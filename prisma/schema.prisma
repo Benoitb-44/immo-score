@@ -1,0 +1,222 @@
+// Immo Score — Schéma Prisma
+// Schéma PostgreSQL isolé : immo_score (via ?schema=immo_score dans DATABASE_URL)
+// Toutes les tables sont créées dans le schéma immo_score, séparé de Homilink.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum EquipementCategorie {
+  HEALTH
+  EDUCATION
+  RETAIL
+  GREEN
+}
+
+enum NiveauRisque {
+  FAIBLE
+  MOYEN
+  FORT
+  TRES_FORT
+}
+
+// ─────────────────────────────────────────────
+// Table 1 : communes
+// Référentiel COG INSEE (~35 000 communes)
+// ─────────────────────────────────────────────
+
+model Commune {
+  code_insee  String  @id
+  nom         String
+  departement String
+  region      String
+  population  Int?
+  superficie  Float?
+  slug        String  @unique
+  lat         Float?
+  lng         Float?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  dvf_prix    DvfPrix[]
+  dpe         DpeCommune[]
+  equipements Equipement[]
+  risques     Risque[]
+  fiscalite   Fiscalite[]
+  demographie Demographie[]
+  score       Score?
+
+  @@map("communes")
+}
+
+// ─────────────────────────────────────────────
+// Table 2 : dvf_prix
+// Transactions Demande de Valeurs Foncières (DVF)
+// ─────────────────────────────────────────────
+
+model DvfPrix {
+  id                   String   @id @default(cuid())
+  code_commune         String
+  date_mutation        DateTime
+  type_local           String
+  surface_reelle_bati  Float?
+  valeur_fonciere      Float
+  prix_m2              Float?
+  adresse              String?
+
+  updated_at DateTime @updatedAt
+
+  commune Commune @relation(fields: [code_commune], references: [code_insee], onDelete: Cascade)
+
+  @@index([code_commune])
+  @@index([date_mutation])
+  @@map("dvf_prix")
+}
+
+// ─────────────────────────────────────────────
+// Table 3 : dpe_communes
+// Diagnostics de Performance Énergétique (ADEME), agrégés par commune
+// ─────────────────────────────────────────────
+
+model DpeCommune {
+  id                       String @id @default(cuid())
+  code_commune             String
+  classe_dpe               String // A, B, C, D, E, F, G
+  nb_logements             Int
+  annee_construction_median Int?
+  conso_energie_median     Float?
+
+  date_ingestion DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  commune Commune @relation(fields: [code_commune], references: [code_insee], onDelete: Cascade)
+
+  @@index([code_commune])
+  @@map("dpe_communes")
+}
+
+// ─────────────────────────────────────────────
+// Table 4 : equipements
+// Base Permanente des Équipements (BPE INSEE) par commune
+// ─────────────────────────────────────────────
+
+model Equipement {
+  id                 String               @id @default(cuid())
+  code_commune       String
+  categorie          EquipementCategorie
+  type_equipement    String
+  nb_etablissements  Int
+  distance_centre_km Float?
+
+  updated_at DateTime @updatedAt
+
+  commune Commune @relation(fields: [code_commune], references: [code_insee], onDelete: Cascade)
+
+  @@index([code_commune])
+  @@index([categorie])
+  @@map("equipements")
+}
+
+// ─────────────────────────────────────────────
+// Table 5 : risques
+// Géorisques — risques naturels et technologiques par commune
+// ─────────────────────────────────────────────
+
+model Risque {
+  id           String       @id @default(cuid())
+  code_commune String
+  type_risque  String
+  niveau       NiveauRisque
+  description  String?
+
+  updated_at DateTime @updatedAt
+
+  commune Commune @relation(fields: [code_commune], references: [code_insee], onDelete: Cascade)
+
+  @@index([code_commune])
+  @@map("risques")
+}
+
+// ─────────────────────────────────────────────
+// Table 6 : fiscalite
+// Taxe foncière par commune (data.economie.gouv.fr)
+// ─────────────────────────────────────────────
+
+model Fiscalite {
+  id                    String @id @default(cuid())
+  code_commune          String
+  annee                 Int
+  taux_taxe_fonciere    Float?
+  taux_taxe_habitation  Float?
+  evolution_yoy         Float?
+
+  updated_at DateTime @updatedAt
+
+  commune Commune @relation(fields: [code_commune], references: [code_insee], onDelete: Cascade)
+
+  @@unique([code_commune, annee])
+  @@index([code_commune])
+  @@map("fiscalite")
+}
+
+// ─────────────────────────────────────────────
+// Table 7 : demographie
+// Démographie INSEE par commune
+// ─────────────────────────────────────────────
+
+model Demographie {
+  id               String @id @default(cuid())
+  code_commune     String
+  annee            Int
+  population       Int
+  evolution_5ans_pct Float?
+  age_median       Float?
+  taux_chomage     Float?
+  revenu_median    Float?
+
+  updated_at DateTime @updatedAt
+
+  commune Commune @relation(fields: [code_commune], references: [code_insee], onDelete: Cascade)
+
+  @@unique([code_commune, annee])
+  @@index([code_commune])
+  @@map("demographie")
+}
+
+// ─────────────────────────────────────────────
+// Table 8 : scores
+// Score composite calculé par commune (0–100)
+// Recalculé après chaque ingestion via compute-scores.ts
+// ─────────────────────────────────────────────
+
+model Score {
+  id                String   @id @default(cuid())
+  code_commune      String   @unique
+  score_global      Float
+  score_dpe         Float?
+  score_dvf         Float?
+  score_bpe         Float?
+  score_risques     Float?
+  score_fiscalite   Float?
+  score_demographie Float?
+  computed_at       DateTime @default(now())
+  version           Int      @default(1)
+
+  updated_at DateTime @updatedAt
+
+  commune Commune @relation(fields: [code_commune], references: [code_insee], onDelete: Cascade)
+
+  @@index([score_global])
+  @@map("scores")
+}
