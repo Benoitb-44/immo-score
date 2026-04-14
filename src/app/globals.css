@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-mono: ui-monospace, "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-paper text-ink font-sans;
+  }
+
+  /* Precision Brutalism: strong outlines on focus */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
+  }
+}
+
+@layer components {
+  /* Score badge variants */
+  .score-badge {
+    @apply inline-flex items-center justify-center font-display font-bold tabular-nums;
+  }
+
+  /* Brutalist border card */
+  .card-brutal {
+    @apply border-2 border-ink bg-paper;
+  }
+
+  /* Monospace data display */
+  .data-mono {
+    @apply font-mono text-sm tabular-nums;
+  }
+}
