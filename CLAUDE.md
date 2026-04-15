@@ -4,8 +4,8 @@
 
 Immo Score est un site de SEO programmatique immobilier qui génère automatiquement une page pour chaque commune de France (~35 000) avec un score d'attractivité immobilière (0-100) basé exclusivement sur des données publiques open data.
 
-**URL** : immoscore.fr (ou score.homilink.fr en phase dev)
-**Repo** : github.com/[org]/immo-score
+**URL** : immorank.fr (production) — repo cloné dans ~/immo-score sur le VPS OVH
+**Repo** : github.com/Benoitb-44/immo-score
 **Fondateur** : Benoît — solo non-technical founder, ne code pas, délègue tout aux agents Claude Code.
 
 ## Stack Technique

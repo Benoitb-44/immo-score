@@ -17,7 +17,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd /var/www/immo-score
+            cd ~/immo-score
             git pull origin main
             docker compose build --no-cache
             docker compose up -d
