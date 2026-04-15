@@ -18,7 +18,8 @@
     "ingest:risques": "tsx src/scripts/ingest-risques.ts",
     "ingest:fiscalite": "tsx src/scripts/ingest-fiscalite.ts",
     "ingest:demo": "tsx src/scripts/ingest-demo.ts",
-    "compute:scores": "tsx src/scripts/compute-scores.ts"
+    "compute:scores": "tsx src/scripts/compute-scores.ts",
+    "test:scoring": "tsx src/scripts/test-scoring.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

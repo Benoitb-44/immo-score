@@ -47,7 +47,27 @@
       "Bash(curl -sk --max-time 20 \"https://files.data.gouv.fr/geo-dvf/latest/csv/2024/communes/01/01001.csv\")",
       "Bash(curl -sk --max-time 15 -w \"\\\\nHTTP_STATUS:%{http_code}\" \"https://geo.api.gouv.fr/departements/01/communes?fields=nom,code,population&limit=5\")",
       "Bash(./node_modules/.bin/prisma db:*)",
-      "Bash(node -e ':*)"
+      "Bash(node -e ':*)",
+      "WebFetch(domain:georisques.gouv.fr)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(tasklist)",
+      "WebFetch(domain:data.ademe.fr)",
+      "Bash(PGPASSWORD='Scoreimmo2026!' psql -h localhost -p 5432 -U postgres -c \"SELECT COUNT\\(*\\) AS total_risques, COUNT\\(DISTINCT code_commune\\) AS communes_avec_risques FROM immo_score.risques;\")",
+      "Bash(node -e 'const { PrismaClient } = require\\('\\\\''@prisma/client'\\\\''\\); const p = new PrismaClient\\(\\); p.$queryRaw`SELECT COUNT\\(*\\)::int AS total_risques, COUNT\\(DISTINCT code_commune\\)::int AS communes_avec_risques FROM immo_score.risques`.then\\(r => console.log\\(JSON.stringify\\(r[0]\\)\\)\\).finally\\(\\(\\) => p.$disconnect\\(\\)\\);')",
+      "Bash(psql 'postgresql://postgres:Scoreimmo2026!@localhost:5432/postgres?options=-c%20search_path%3Dimmo_score' -c ':*)",
+      "Read(//usr/local/bin/**)",
+      "Read(//c/Program Files/PostgreSQL/**)",
+      "Read(//mnt/c/Program Files/**)",
+      "Bash('/c/Program Files/PostgreSQL/16/bin/psql.exe' 'postgresql://postgres:Scoreimmo2026!@localhost:5432/postgres?options=-c%20search_path%3Dimmo_score' -c ':*)",
+      "Bash('/c/Program Files/PostgreSQL/16/bin/psql.exe' -h localhost -U postgres -d postgres -c ':*)",
+      "Bash(npx tsx:*)",
+      "Bash(PGPASSWORD=\"Scoreimmo2026!\" PGCLIENTENCODING=\"UTF8\" \"/c/Program Files/PostgreSQL/16/bin/psql.exe\" -h localhost -U postgres -d postgres -c \"SELECT COUNT\\(*\\) FROM immo_score.dvf_prix WHERE code_commune LIKE '751%';\")",
+      "Bash(PGPASSWORD=\"Scoreimmo2026!\" PGCLIENTENCODING=\"UTF8\" \"/c/Program Files/PostgreSQL/16/bin/psql.exe\" -h localhost -U postgres -d postgres -c \"SELECT COUNT\\(*\\) FROM immo_score.dvf_prix WHERE code_commune LIKE '75%'; SELECT COUNT\\(*\\) FROM immo_score.dvf_prix WHERE code_commune LIKE '69%';\")",
+      "Bash(PGPASSWORD=\"Scoreimmo2026!\" PGCLIENTENCODING=\"UTF8\" \"/c/Program Files/PostgreSQL/16/bin/psql.exe\" -h localhost -U postgres -d postgres -c \"SELECT DISTINCT code_commune FROM immo_score.dvf_prix WHERE code_commune LIKE '693%' ORDER BY 1;\")",
+      "Bash(PGPASSWORD=\"Scoreimmo2026!\" PGCLIENTENCODING=\"UTF8\" \"/c/Program Files/PostgreSQL/16/bin/psql.exe\" -h localhost -U postgres -d postgres -c \"SELECT DISTINCT code_commune FROM immo_score.dvf_prix WHERE code_commune LIKE '69%' ORDER BY 1 LIMIT 10;\")",
+      "Bash(PGPASSWORD=\"Scoreimmo2026!\" PGCLIENTENCODING=\"UTF8\" \"/c/Program Files/PostgreSQL/16/bin/psql.exe\" -h localhost -U postgres -d postgres -c \"SELECT DISTINCT code_commune FROM immo_score.dvf_prix WHERE code_commune LIKE '691%' ORDER BY 1 LIMIT 5; SELECT code_insee, nom FROM immo_score.communes WHERE code_insee = '69123';\")",
+      "Bash(PGPASSWORD=\"Scoreimmo2026!\" PGCLIENTENCODING=\"UTF8\" \"/c/Program Files/PostgreSQL/16/bin/psql.exe\" -h localhost -U postgres -d postgres -c \"SELECT code_insee, nom FROM immo_score.communes WHERE code_insee IN \\('69001','69002','69003','69123'\\) ORDER BY 1;\")",
+      "Bash(PGPASSWORD=\"Scoreimmo2026!\" PGCLIENTENCODING=\"UTF8\" \"/c/Program Files/PostgreSQL/16/bin/psql.exe\" -h localhost -U postgres -d postgres -c \"SELECT COUNT\\(*\\) FROM immo_score.dvf_prix WHERE code_commune = '69123'; SELECT COUNT\\(*\\) FROM immo_score.dvf_prix WHERE code_commune = '75056';\")"
     ]
   }
 }
