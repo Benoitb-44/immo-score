@@ -103,7 +103,7 @@ async function parseDeptCsv(dept: string): Promise<Map<string, DvfRecord[]>> {
   const rl = createInterface({ input: nodeStream.pipe(gunzip), crlfDelay: Infinity });
 
   let isHeader = true;
-  let headerMap: Record<string, number> = {};
+  const headerMap: Record<string, number> = {};
 
   for await (const line of rl) {
     if (!line.trim()) continue;
@@ -196,7 +196,6 @@ async function ingest(filterDepts?: string[]): Promise<IngestResult> {
   const start = Date.now();
   const allErrors: string[] = [];
   let totalCommunes = 0;
-  let totalInserted = 0;
 
   // Récupère la liste des départements depuis notre table communes
   const deptRows = await prisma.commune.findMany({
@@ -226,7 +225,6 @@ async function ingest(filterDepts?: string[]): Promise<IngestResult> {
       const { inserted, communes, errors } = await upsertDeptData(byCommune, knownCommunes);
       allErrors.push(...errors);
       totalCommunes += communes;
-      totalInserted += inserted;
 
       process.stdout.write(`${communes} communes, ${inserted} transactions\n`);
     } catch (e: unknown) {
