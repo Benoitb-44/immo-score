@@ -71,7 +71,12 @@
       "Bash(npx tsc *)",
       "Bash(xargs ls *)",
       "Bash(docker compose *)",
-      "Bash(chmod +x /workspaces/immo-score/scripts/migrate-db.sh)"
+      "Bash(chmod +x /workspaces/immo-score/scripts/migrate-db.sh)",
+      "Bash(cp /workspaces/immo-score/docs/agents/cto.md /workspaces/immo-score/.claude/agents/cto.md)",
+      "Bash(cp /workspaces/immo-score/docs/agents/frontend.md /workspaces/immo-score/.claude/agents/frontend.md)",
+      "Bash(cp /workspaces/immo-score/docs/agents/backend.md /workspaces/immo-score/.claude/agents/backend.md)",
+      "Bash(cp /workspaces/immo-score/docs/agents/data-engineer.md /workspaces/immo-score/.claude/agents/data-engineer.md)",
+      "Bash(cp /workspaces/immo-score/docs/agents/code-reviewer.md /workspaces/immo-score/.claude/agents/code-reviewer.md)"
     ]
   }
 }
