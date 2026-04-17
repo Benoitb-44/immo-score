@@ -183,9 +183,6 @@ export default async function CommunePage({
                 <span className="border-2 border-ink bg-paper-soft px-3 py-1 font-mono text-xs font-bold">
                   Dép. {commune.departement}
                 </span>
-                <span className="border-2 border-ink bg-paper-soft px-3 py-1 font-mono text-xs text-ink-muted">
-                  {commune.region}
-                </span>
               </div>
               <h1 className="font-display text-4xl sm:text-5xl font-bold text-ink leading-tight">
                 {commune.nom}
