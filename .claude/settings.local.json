@@ -77,7 +77,11 @@
       "Bash(cp /workspaces/immo-score/docs/agents/backend.md /workspaces/immo-score/.claude/agents/backend.md)",
       "Bash(cp /workspaces/immo-score/docs/agents/data-engineer.md /workspaces/immo-score/.claude/agents/data-engineer.md)",
       "Bash(cp /workspaces/immo-score/docs/agents/code-reviewer.md /workspaces/immo-score/.claude/agents/code-reviewer.md)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no ubuntu@37.59.122.208 \"echo 'SSH OK' && docker ps --filter name=immo-score --format '{{.Names}} — {{.Status}}'\")",
+      "Bash(gh run *)",
+      "Bash(ssh -o StrictHostKeyChecking=no ubuntu@37.59.122.208 \"docker exec immo-score npm run ingest:dpe 2>&1\")",
+      "Bash(ssh -o StrictHostKeyChecking=no ubuntu@37.59.122.208 \"docker exec immo-score npm run compute:scores 2>&1\")"
     ]
   }
 }

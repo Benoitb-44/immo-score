@@ -5,9 +5,17 @@ export default function Footer() {
         <p className="font-mono text-xs text-ink-muted">
           © {new Date().getFullYear()} ImmoRank — Données publiques open data
         </p>
-        <p className="font-mono text-xs text-ink-muted">
-          Sources : DVF · ADEME · INSEE · Géorisques
-        </p>
+        <div className="flex items-center gap-4 flex-wrap">
+          <a
+            href="/methodologie"
+            className="font-mono text-xs text-ink-muted hover:text-ink transition-colors"
+          >
+            Méthodologie
+          </a>
+          <p className="font-mono text-xs text-ink-muted">
+            Sources : DVF · ADEME · INSEE · Géorisques
+          </p>
+        </div>
       </div>
     </footer>
   )

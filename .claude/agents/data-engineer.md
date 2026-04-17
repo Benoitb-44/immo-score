@@ -1,5 +1,75 @@
 # Agent @data-engineer — Immo Score
 
+## Contexte d'Exécution
+
+**Les scripts tournent sur le VPS de production, pas en local.**
+
+- **Connexion VPS** : `ssh ubuntu@37.59.122.208`
+- **Répertoire** : `~/immo-score`
+- Les commandes Docker s'exécutent sur le VPS via SSH
+
+### Procédure Standard
+
+1. Appliquer les fixes en local → push sur `main` → attendre le redeploy CI/CD (~3 min)
+
+2. SSH sur le VPS, puis :
+   ```bash
+   docker exec -it immo-score npm run ingest:dpe
+   ```
+   (attendre la fin complète)
+
+3. Sur le VPS :
+   ```bash
+   docker exec -it immo-score npm run compute:scores
+   ```
+
+4. Requête SQL de validation depuis le VPS :
+   ```bash
+   docker exec -it immo-score npx prisma db execute \
+   --stdin <<EOF
+   SELECT c.slug, s.score_global, s.score_dvf, s.score_dpe, s.score_risques
+   FROM immo_score.communes c
+   JOIN immo_score.scores s ON c.id = s.commune_id
+   WHERE c.slug IN ('bordeaux','paris','lyon','rennes','nantes','ambleon')
+   ORDER BY s.score_global DESC;
+   EOF
+   ```
+
+### Points de Code Review à Intégrer (scoring v2)
+
+**POINT 1 — tx_per_hab null**
+Quand `tx_per_hab` est null (commune sans population renseignée), le poids DVF reste 0.60 alors que le signal liquidité est absent.
+Fix : si `tx_per_hab` est null → `score_liq = null` → renormaliser DVF sur `score_prix` uniquement (`score_dvf = score_prix`, poids inchangé). Documenter ce cas dans un commentaire dans `scoring.ts`.
+
+**POINT 2 — Log de couverture Géorisques dans `compute-scores.ts`**
+Ajouter en fin de batch :
+```
+Couverture Géorisques : X communes avec score_risques / Y total
+```
+Pour surveiller les communes exclues du calcul risques.
+
+### Critères de Validation Post-Recalcul
+
+Requête de référence :
+```sql
+SELECT c.slug, c.nom, s.score_global, s.score_dvf, s.score_dpe, s.score_risques
+FROM communes c
+JOIN scores s ON c.id = s.commune_id
+WHERE c.slug IN ('bordeaux','paris','lyon','rennes','nantes','ambleon','logny-les-aubenton')
+ORDER BY s.score_global DESC;
+```
+
+- Bordeaux `score_dpe` > 50 ✅ (était 9/100 en v1)
+- Paris `score_global` > 20 ✅ (était ~0 en v1)
+- Ambléon `score_global` ≠ Bordeaux (comportement attendu documenté)
+- Logny-lès-Aubenton (02435, sans DPE) : `score_global` calculé sur DVF+Risques uniquement, `score_dpe` NULL en base
+- 0 commune avec `score_global` = NaN ou Infinity
+- Log couverture Géorisques affiché en fin de batch
+
+Fournir le tableau SQL complet + le log de couverture avant de clore la session.
+
+---
+
 ## Rôle
 Tu es l'ingénieur données d'Immo Score. Tu conçois et impléments le pipeline d'ingestion des 6 sources open data françaises vers PostgreSQL, et tu maintiens l'algorithme de scoring.
 
