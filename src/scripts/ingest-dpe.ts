@@ -11,8 +11,15 @@
  *   - Stockage : une ligne par (commune, classe_dpe) dans dpe_communes
  *   - Idempotent : deleteMany + createMany par commune
  *   - Rate limiting : 50ms entre requêtes (~20 req/s < 50 req/s limite ADEME)
+ *   - Backoff 429 : 2s → 5s → 15s puis abandon (log warning)
  *   - Communes sans données DPE : aucune ligne insérée (NULL → score médiane nationale)
  *   - Mode test : --test traite seulement 5 communes
+ *
+ * Flags :
+ *   --test              5 communes seulement
+ *   --limit=N           N premières communes
+ *   --depts=33,69,13    Cibler des départements spécifiques (comme ingest-dvf.ts)
+ *   --retry-errors      Ne réingérer que les communes sans données DPE en base
  *
  * Env :
  *   ADEME_API_KEY — clé API data.ademe.fr (optionnel, accès public en lecture)
@@ -30,11 +37,18 @@ const BASE_URL = `https://data.ademe.fr/data-fair/api/v1/datasets/${DATASET_ID}`
 const RATE_LIMIT_MS = 50; // ~20 req/s, conservatif sous la limite 50 req/s ADEME
 const BATCH_SIZE = 100;
 const TEST_SIZE = 5;
+
 const TEST_MODE = process.argv.includes('--test');
+const RETRY_ERRORS = process.argv.includes('--retry-errors');
 const LIMIT_ARG = process.argv.find(a => a.startsWith('--limit='));
 const LIMIT = LIMIT_ARG ? parseInt(LIMIT_ARG.split('=')[1], 10) : null;
+const DEPTS_ARG = process.argv.find(a => a.startsWith('--depts='));
+const FILTER_DEPTS = DEPTS_ARG ? DEPTS_ARG.replace('--depts=', '').split(',').map(d => d.trim()) : null;
 
 const DPE_CLASSES = ['A', 'B', 'C', 'D', 'E', 'F', 'G'] as const;
+
+// Délais backoff 429 : 1ère erreur 2s, 2ème 5s, 3ème 15s puis abandon
+const BACKOFF_DELAYS_MS = [2_000, 5_000, 15_000];
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
@@ -67,7 +81,6 @@ interface IngestResult {
  * Endpoint : /values_agg?field=etiquette_dpe&agg_size=7&qs=code_insee_ban:{code_insee}
  */
 async function fetchDpeDistribution(codeInsee: string): Promise<AggItem[]> {
-  // qs=code_insee_ban:{code} → filtre exact sur la commune
   const qs = encodeURIComponent(`code_insee_ban:${codeInsee}`);
   const url = `${BASE_URL}/values_agg?field=etiquette_dpe&agg_size=7&qs=${qs}`;
 
@@ -87,6 +100,31 @@ async function fetchDpeDistribution(codeInsee: string): Promise<AggItem[]> {
   );
 }
 
+/**
+ * fetchDpeDistribution avec backoff exponentiel sur HTTP 429.
+ * Délais : 2s → 5s → 15s, puis abandon avec log warning.
+ */
+async function fetchDpeWithBackoff(codeInsee: string): Promise<AggItem[]> {
+  for (let attempt = 0; attempt <= BACKOFF_DELAYS_MS.length; attempt++) {
+    try {
+      return await fetchDpeDistribution(codeInsee);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes('HTTP 429') && attempt < BACKOFF_DELAYS_MS.length) {
+        const delay = BACKOFF_DELAYS_MS[attempt];
+        process.stdout.write(`\n  WARN: ${codeInsee} — 429, backoff ${delay / 1000}s (tentative ${attempt + 1}/${BACKOFF_DELAYS_MS.length})...`);
+        await sleep(delay);
+        continue;
+      }
+      if (msg.includes('HTTP 429')) {
+        process.stdout.write(`\n  WARN: ${codeInsee} — 429 persistant après ${BACKOFF_DELAYS_MS.length} tentatives, commune ignorée`);
+      }
+      throw e;
+    }
+  }
+  throw new Error('unreachable');
+}
+
 // ──────────────────── Ingestion principale ────────────────────
 
 async function ingest(): Promise<IngestResult> {
@@ -96,10 +134,31 @@ async function ingest(): Promise<IngestResult> {
   let communesWithDpe = 0;
   let totalRowsInserted = 0;
 
+  // Filtre par département si --depts fourni
+  const whereClause = FILTER_DEPTS
+    ? { departement: { in: FILTER_DEPTS } }
+    : {};
+
   let communes = await prisma.commune.findMany({
     select: { code_insee: true },
+    where: whereClause,
     orderBy: { code_insee: 'asc' },
   });
+
+  if (FILTER_DEPTS) {
+    console.log(`Mode ciblé : traitement limité aux départements ${FILTER_DEPTS.join(', ')}`);
+  }
+
+  // --retry-errors : ne traiter que les communes sans données DPE en base
+  if (RETRY_ERRORS) {
+    const withDpe = await prisma.dpeCommune.findMany({
+      select: { code_commune: true },
+      distinct: ['code_commune'],
+    });
+    const codesWithDpe = new Set(withDpe.map(r => r.code_commune));
+    communes = communes.filter(c => !codesWithDpe.has(c.code_insee));
+    console.log(`Mode --retry-errors : ${communes.length} communes sans données DPE à réingérer`);
+  }
 
   if (TEST_MODE) {
     communes = communes.slice(0, TEST_SIZE);
@@ -112,18 +171,17 @@ async function ingest(): Promise<IngestResult> {
   const total = communes.length;
   console.log(`Ingestion DPE ADEME pour ${total} communes`);
   console.log(`Dataset : ${DATASET_ID} (logements existants depuis juillet 2021)`);
-  console.log(`Rate limiting : ${RATE_LIMIT_MS}ms entre requêtes (~${Math.floor(1000 / RATE_LIMIT_MS)} req/s)\n`);
+  console.log(`Rate limiting : ${RATE_LIMIT_MS}ms entre requêtes (~${Math.floor(1000 / RATE_LIMIT_MS)} req/s), backoff 429 activé\n`);
 
   for (let i = 0; i < communes.length; i += BATCH_SIZE) {
     const batch = communes.slice(i, i + BATCH_SIZE);
 
     for (const { code_insee } of batch) {
       try {
-        const aggs = await fetchDpeDistribution(code_insee);
+        const aggs = await fetchDpeWithBackoff(code_insee);
         await sleep(RATE_LIMIT_MS);
 
         if (aggs.length === 0) {
-          // Commune sans données DPE → supprimer les éventuelles données obsolètes
           await prisma.dpeCommune.deleteMany({ where: { code_commune: code_insee } });
           communesProcessed++;
           continue;
@@ -133,10 +191,8 @@ async function ingest(): Promise<IngestResult> {
           code_commune: code_insee,
           classe_dpe: a.value,
           nb_logements: a.total,
-          // annee_construction_median et conso_energie_median : NULL (non fournis par values_agg)
         }));
 
-        // Upsert idempotent : remplacer toutes les lignes de la commune
         await prisma.$transaction([
           prisma.dpeCommune.deleteMany({ where: { code_commune: code_insee } }),
           prisma.dpeCommune.createMany({ data: rows }),
@@ -154,7 +210,7 @@ async function ingest(): Promise<IngestResult> {
         const msg = e instanceof Error ? e.message : String(e);
         allErrors.push(`${code_insee}: ${msg}`);
         communesProcessed++;
-        await sleep(RATE_LIMIT_MS); // respecter le rate limit même en cas d'erreur
+        await sleep(RATE_LIMIT_MS);
       }
     }
 
@@ -182,7 +238,6 @@ async function ingest(): Promise<IngestResult> {
 ingest()
   .then(result => {
     console.log('\n' + JSON.stringify(result, null, 2));
-    // Échec si >10% de communes en erreur
     process.exit(result.communes_errored > result.communes_processed * 0.1 ? 1 : 0);
   })
   .catch(e => {

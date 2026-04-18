@@ -10,7 +10,8 @@
  *
  * Usage :
  *   npm run compute:scores
- *   npm run compute:scores -- --test   (10 premières communes uniquement)
+ *   npm run compute:scores -- --test              (10 premières communes)
+ *   npm run compute:scores -- --depts=33,69,13    (départements ciblés)
  */
 
 import { PrismaClient } from '@prisma/client';
@@ -20,6 +21,8 @@ const prisma = new PrismaClient();
 const BATCH_SIZE = 100;
 const TEST_MODE = process.argv.includes('--test');
 const TEST_LIMIT = 10;
+const DEPTS_ARG = process.argv.find(a => a.startsWith('--depts='));
+const FILTER_DEPTS = DEPTS_ARG ? DEPTS_ARG.replace('--depts=', '').split(',').map(d => d.trim()) : null;
 
 interface ComputeResult {
   communes_processed: number;
@@ -33,9 +36,15 @@ interface ComputeResult {
 async function main(): Promise<ComputeResult> {
   const startedAt = Date.now();
 
+  const whereClause = FILTER_DEPTS ? { departement: { in: FILTER_DEPTS } } : {};
+
+  if (FILTER_DEPTS) {
+    console.log(`[compute-scores] Mode ciblé : départements ${FILTER_DEPTS.join(', ')}`);
+  }
+
   const total = TEST_MODE
     ? TEST_LIMIT
-    : await prisma.commune.count();
+    : await prisma.commune.count({ where: whereClause });
 
   let processed = 0;
   let updated = 0;
@@ -57,6 +66,7 @@ async function main(): Promise<ComputeResult> {
 
     const communes = await prisma.commune.findMany({
       select: { code_insee: true, nom: true },
+      where: whereClause,
       orderBy: { code_insee: 'asc' },
       skip: offset,
       take: batchSize,
