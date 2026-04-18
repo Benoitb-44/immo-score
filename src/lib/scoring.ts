@@ -103,9 +103,9 @@ export interface RisquesDetails {
 }
 
 export interface BpeDetails {
-  /** Score dimension BPE 0-100 (null = commune absente de la table bpe_communes) */
+  /** Score dimension BPE 0-100 (absent du dataset → 10 ; présent 0 équipement → 0) */
   score: number | null;
-  /** Nombre d'équipements essentiels présents sur 30 */
+  /** Nombre d'équipements essentiels présents sur 30 (null si absent du dataset) */
   total_equip_essentiels: number | null;
 }
 
@@ -265,6 +265,13 @@ async function fetchRisquesDetails(
 /**
  * Calcule le score BPE d'une commune.
  * Formule : totalEquipEssentiels / BPE_TOTAL × 100, capé à 100.
+ *
+ * Cas absent du dataset BPE 2024 niveau commune : floor à 10.
+ * Motif : ~11 000 communes rurales (31%) ne figurent pas dans le fichier BPE
+ * à maille commune — cela ne signifie pas "zéro équipement" mais "non mesuré".
+ * Un floor à 10 évite que 0^0.25 = 0 annule le score global en agrégation
+ * géométrique. Cas distinct des communes présentes avec 0 équipement essentiel
+ * (vrai absence locale, score 0 justifié, < 500 communes).
  */
 async function fetchBpeDetails(
   communeId: string,
@@ -275,7 +282,15 @@ async function fetchBpeDetails(
     select: { total_equip_essentiels: true },
   });
 
-  if (!bpe) return { score: null, total_equip_essentiels: null };
+  if (!bpe) {
+    // Commune absente du dataset BPE 2024 → présence minimale non mesurée
+    return { score: 10, total_equip_essentiels: null };
+  }
+
+  if (bpe.total_equip_essentiels === 0) {
+    // Présente dans BPE mais aucun des 30 équipements essentiels → vrai zéro
+    return { score: 0, total_equip_essentiels: 0 };
+  }
 
   const score = round1(Math.min(100, (bpe.total_equip_essentiels / BPE_TOTAL) * 100));
   return { score, total_equip_essentiels: bpe.total_equip_essentiels };
