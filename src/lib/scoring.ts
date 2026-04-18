@@ -1,16 +1,17 @@
 /**
- * scoring.ts — v3
+ * scoring.ts — v3.1
  *
  * Algorithme de score composite 0-100 par commune (ADR-IS-002, ADR-IS-005).
  *
- * Goalposts absolus :
- *   DVF prix   : [≤800 →100, ≥6000 →0] €/m² (inverse)
- *   DVF liq    : [0 →0, ≥0.05 →100] tx/hab
- *   DPE        : [≤40% →0, 100% →100] pct_non_passoire (logements ≤ classe E)
- *   Risques    : départ 100, malus MOYEN−5 / FORT−15 / TRES_FORT−20
- *   BPE        : totalEquipEssentiels / 30 × 100, capé à 100
+ * Changements v3.1 vs v3 :
+ *   DVF prix   : gaussienne centrée sur médiane nationale — exp(-0.7 × |delta/médiane|)
+ *                (remplace goalpost inverse [800→100, 6000→0] qui sur-récompensait les
+ *                 communes rurales à prix très bas et pénalisait les marchés tendus).
+ *   DVF liq    : floor à 5 (évite score 0 sur communes peu actives).
+ *   Risques    : floor à 10 quand score brut ≤ 0 — évite l'annihilation géométrique
+ *                pour les communes à risques cumulés très élevés.
  *
- * Pondérations v3 : DVF 45%, DPE 10%, Risques 20%, BPE 25%.
+ * Pondérations v3.1 : DVF 45%, DPE 10%, Risques 20%, BPE 25% (inchangées).
  * Agrégation géométrique pondérée — poids renormalisés sur dimensions présentes.
  * Dimensions manquantes → null (aucune imputation médiane).
  * Clip [1, 100] avant exponentiation pour éviter l'annihilation par zéro.
@@ -19,15 +20,18 @@
 import { PrismaClient, NiveauRisque } from '@prisma/client';
 import { BPE_TOTAL } from './bpe-codes';
 
-// ─── Goalposts ────────────────────────────────────────────────────────────────
+// ─── Constantes DVF ───────────────────────────────────────────────────────────
 
-const DVF_PRIX_BEST  = 800;   // ≤ → score 100
-const DVF_PRIX_WORST = 6000;  // ≥ → score 0
-const DVF_LIQ_FULL   = 0.05;  // ≥ → score 100
-const DPE_NP_FLOOR   = 40;    // % non-passoire ≤ → score 0
-const DPE_NP_CEIL    = 100;   // % non-passoire = → score 100
+// Gaussienne prix : sigma implicite via coefficient 0.7 (delta=100% → score ~50)
+const DVF_LIQ_FULL  = 0.05;  // tx/hab ≥ → score liquidité 100
+const DVF_LIQ_FLOOR = 5;     // plancher liquidité — commune active au minimum
 
-// ─── Pondérations v3 ──────────────────────────────────────────────────────────
+// ─── Constantes DPE ───────────────────────────────────────────────────────────
+
+const DPE_NP_FLOOR = 40;   // % non-passoire ≤ → score 0
+const DPE_NP_CEIL  = 100;  // % non-passoire = → score 100
+
+// ─── Pondérations v3.1 ────────────────────────────────────────────────────────
 
 const W     = { dvf: 0.45, dpe: 0.10, risques: 0.20, bpe: 0.25 } as const;
 const W_DVF = { prix: 0.70, liq: 0.30 }                           as const;
@@ -67,14 +71,21 @@ function geometricScore(dims: Array<{ score: number; weight: number }>): number 
 
 // ─── Types publics ────────────────────────────────────────────────────────────
 
+export interface NationalMedians {
+  /** Médiane nationale des prix m² médians par commune — appartements */
+  appart: number | null;
+  /** Médiane nationale des prix m² médians par commune — maisons */
+  maison: number | null;
+}
+
 export interface DvfDetails {
   /** Score dimension DVF 0-100 (null = pas de données DVF pour cette commune) */
   score: number | null;
-  /** Score sous-dimension prix (goalpost inverse, 0-100) */
+  /** Score sous-dimension prix (gaussienne centrée sur médiane nationale, 0-100) */
   score_prix: number | null;
-  /** Score sous-dimension liquidité (goalpost, 0-100) */
+  /** Score sous-dimension liquidité (goalpost floor 5, 0-100) */
   score_liq: number | null;
-  /** Prix m² médian observé (€) */
+  /** Prix m² médian observé (€) — moyenne appart/maison si les deux existent */
   prix_m2_median: number | null;
   /** Transactions par habitant */
   tx_per_hab: number | null;
@@ -120,51 +131,127 @@ export interface ScoreDetails {
   };
 }
 
+// ─── Médianes nationales DVF (lazy cache) ────────────────────────────────────
+
+let _cachedNationalMedians: NationalMedians | null = null;
+
+/**
+ * Calcule les médianes nationales DVF (médiane des médianes par commune).
+ * Résultat mis en cache pour la durée du processus.
+ * Appelé une fois avant le batch dans compute-scores.ts pour les logs ;
+ * appelé automatiquement via calculateScore() pour les appels isolés (API, tests).
+ */
+export async function fetchNationalMedians(client: PrismaClient): Promise<NationalMedians> {
+  if (_cachedNationalMedians) return _cachedNationalMedians;
+
+  const rows = await client.$queryRaw<Array<{ type_local: string; national_median: string | null }>>`
+    SELECT type_local,
+           PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY median_prix)::text AS national_median
+    FROM (
+      SELECT code_commune, type_local,
+             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY prix_m2) AS median_prix
+      FROM immo_score.dvf_prix
+      WHERE type_local IN ('Appartement', 'Maison')
+        AND prix_m2 IS NOT NULL AND prix_m2 > 0
+      GROUP BY code_commune, type_local
+    ) sub
+    GROUP BY type_local
+  `;
+
+  const appartRow = rows.find(r => r.type_local === 'Appartement');
+  const maisonRow = rows.find(r => r.type_local === 'Maison');
+
+  _cachedNationalMedians = {
+    appart: appartRow?.national_median ? parseFloat(appartRow.national_median) : null,
+    maison: maisonRow?.national_median ? parseFloat(maisonRow.national_median) : null,
+  };
+
+  return _cachedNationalMedians;
+}
+
 // ─── Requête DVF ──────────────────────────────────────────────────────────────
 
-interface DvfRow {
+interface DvfPrixByTypeRow {
+  type_local: string;
   prix_m2_median: string | null;
-  tx_per_hab:     string | null;
-  nb_transactions: string | null;
+}
+
+interface DvfLiqRow {
+  tx_per_hab:      string | null;
+  nb_transactions: string;
 }
 
 async function fetchDvfDetails(
   communeId: string,
   client: PrismaClient,
+  nationalMedians: NationalMedians,
 ): Promise<DvfDetails> {
-  const rows = await client.$queryRaw<DvfRow[]>`
-    SELECT
-      PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY d.prix_m2)::text   AS prix_m2_median,
-      (COUNT(*)::float / NULLIF(c.population, 0))::text               AS tx_per_hab,
-      COUNT(*)::text                                                   AS nb_transactions
-    FROM immo_score.dvf_prix d
-    JOIN immo_score.communes c ON c.code_insee = d.code_commune
-    WHERE d.code_commune = ${communeId}
-      AND d.prix_m2 IS NOT NULL
-      AND d.prix_m2 > 0
-    GROUP BY c.population
-  `;
+  const [prixRows, liqRows] = await Promise.all([
+    client.$queryRaw<DvfPrixByTypeRow[]>`
+      SELECT type_local,
+             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY prix_m2)::text AS prix_m2_median
+      FROM immo_score.dvf_prix
+      WHERE code_commune = ${communeId}
+        AND type_local IN ('Appartement', 'Maison')
+        AND prix_m2 IS NOT NULL AND prix_m2 > 0
+      GROUP BY type_local
+    `,
+    client.$queryRaw<DvfLiqRow[]>`
+      SELECT (COUNT(*)::float / NULLIF(c.population, 0))::text AS tx_per_hab,
+             COUNT(*)::text                                     AS nb_transactions
+      FROM immo_score.dvf_prix d
+      JOIN immo_score.communes c ON c.code_insee = d.code_commune
+      WHERE d.code_commune = ${communeId}
+        AND d.prix_m2 IS NOT NULL AND d.prix_m2 > 0
+      GROUP BY c.population
+    `,
+  ]);
 
-  if (rows.length === 0 || rows[0].prix_m2_median == null) {
+  const appartRow = prixRows.find(r => r.type_local === 'Appartement');
+  const maisonRow = prixRows.find(r => r.type_local === 'Maison');
+
+  if (!appartRow && !maisonRow) {
     return {
       score: null, score_prix: null, score_liq: null,
       prix_m2_median: null, tx_per_hab: null, nb_transactions: null,
     };
   }
 
-  const prix    = parseFloat(rows[0].prix_m2_median);
-  const txPerHab = rows[0].tx_per_hab != null ? parseFloat(rows[0].tx_per_hab) : null;
-  const nbTx     = rows[0].nb_transactions != null ? parseInt(rows[0].nb_transactions) : null;
+  const prixAppart = appartRow?.prix_m2_median ? parseFloat(appartRow.prix_m2_median) : null;
+  const prixMaison = maisonRow?.prix_m2_median ? parseFloat(maisonRow.prix_m2_median) : null;
 
-  const scorePrix = round1(
-    clamp((DVF_PRIX_WORST - prix) / (DVF_PRIX_WORST - DVF_PRIX_BEST) * 100, 0, 100),
-  );
-  const scoreLiq = txPerHab != null
-    ? round1(clamp(txPerHab / DVF_LIQ_FULL * 100, 0, 100))
+  // Prix commune + médiane de référence (moyenne égale appart/maison si les deux existent)
+  let prixCommune: number;
+  let medianeRef: number;
+
+  if (prixAppart != null && prixMaison != null) {
+    prixCommune = (prixAppart + prixMaison) / 2;
+    medianeRef  = ((nationalMedians.appart ?? prixAppart) + (nationalMedians.maison ?? prixMaison)) / 2;
+  } else if (prixAppart != null) {
+    prixCommune = prixAppart;
+    medianeRef  = nationalMedians.appart ?? prixAppart;
+  } else {
+    prixCommune = prixMaison!;
+    medianeRef  = nationalMedians.maison ?? prixMaison!;
+  }
+
+  // Gaussienne : communes proches de la médiane nationale → score ~100 ;
+  // écart relatif de 100% → score ~50 (exp(-0.7) ≈ 0.50)
+  const delta     = medianeRef > 0 ? Math.abs(prixCommune - medianeRef) / medianeRef : 0;
+  const scorePrix = round1(100 * Math.exp(-0.7 * delta));
+
+  // Liquidité avec floor à 5
+  const txPerHab = liqRows.length > 0 && liqRows[0].tx_per_hab != null
+    ? parseFloat(liqRows[0].tx_per_hab)
     : null;
+  const nbTx = liqRows.length > 0 ? parseInt(liqRows[0].nb_transactions) : null;
 
   // Si tx_per_hab est null (population absente ou 0), le signal liquidité est indisponible.
   // On renormalise DVF sur score_prix uniquement — le poids global DVF (0.45) reste inchangé.
+  const scoreLiq = txPerHab != null
+    ? round1(Math.max(DVF_LIQ_FLOOR, clamp(txPerHab / DVF_LIQ_FULL * 100, 0, 100)))
+    : null;
+
   const score = scoreLiq != null
     ? round1(W_DVF.prix * scorePrix + W_DVF.liq * scoreLiq)
     : scorePrix;
@@ -173,7 +260,7 @@ async function fetchDvfDetails(
     score,
     score_prix:      scorePrix,
     score_liq:       scoreLiq,
-    prix_m2_median:  Math.round(prix),
+    prix_m2_median:  Math.round(prixCommune),
     tx_per_hab:      txPerHab,
     nb_transactions: nbTx,
   };
@@ -257,7 +344,13 @@ async function fetchRisquesDetails(
     else if (row.niveau === NiveauRisque.FAIBLE)    counts.faible    += cnt;
   }
 
-  return { score: Math.max(0, 100 - malus), ...counts };
+  const rawScore = 100 - malus;
+  // Floor à 10 : cumul de risques très forts peut amener rawScore ≤ 0, ce qui
+  // annulerait le score global en agrégation géométrique (0^w = 0 → global ≈ 0).
+  // Un plancher à 10 distingue "risques extrêmes" (10) de "données absentes" (null).
+  const score = rawScore <= 0 ? 10 : rawScore;
+
+  return { score, ...counts };
 }
 
 // ─── Requête BPE ──────────────────────────────────────────────────────────────
@@ -303,13 +396,15 @@ const defaultClient = new PrismaClient();
 /**
  * Calcule le score composite (0-100) d'une commune française.
  *
- * @param communeId  Code INSEE de la commune (ex. "75056" pour Paris)
- * @param client     PrismaClient (optionnel, utilise le client par défaut)
- * @returns          ScoreDetails ou null si la commune n'existe pas
+ * @param communeId      Code INSEE de la commune (ex. "75056" pour Paris)
+ * @param client         PrismaClient (optionnel, utilise le client par défaut)
+ * @param nationalMedians Médianes nationales DVF pré-calculées (optionnel — lazy cache sinon)
+ * @returns              ScoreDetails ou null si la commune n'existe pas
  */
 export async function calculateScore(
   communeId: string,
   client: PrismaClient = defaultClient,
+  nationalMedians?: NationalMedians,
 ): Promise<ScoreDetails | null> {
   const commune = await client.commune.findUnique({
     where:  { code_insee: communeId },
@@ -317,8 +412,10 @@ export async function calculateScore(
   });
   if (!commune) return null;
 
+  const medians = nationalMedians ?? await fetchNationalMedians(client);
+
   const [dvf, dpe, risques, bpe] = await Promise.all([
-    fetchDvfDetails(communeId, client),
+    fetchDvfDetails(communeId, client, medians),
     fetchDpeDetails(communeId, client),
     fetchRisquesDetails(communeId, client),
     fetchBpeDetails(communeId, client),

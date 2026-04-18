@@ -83,7 +83,20 @@
       "Bash(ssh -o StrictHostKeyChecking=no ubuntu@37.59.122.208 \"docker exec immo-score npm run ingest:dpe 2>&1\")",
       "Bash(ssh -o StrictHostKeyChecking=no ubuntu@37.59.122.208 \"docker exec immo-score npm run compute:scores 2>&1\")",
       "Bash(grep -E \"\\\\.json$|\\\\.config\\\\.|^d\")",
-      "Bash(ssh -o *)"
+      "Bash(ssh -o *)",
+      "WebFetch(domain:immorank.fr)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(curl -s -o /tmp/bpe24_table_passage.csv \"https://www.insee.fr/fr/metadonnees/source/fichier/BPE24_table_passage.csv\")",
+      "Read(//tmp/**)",
+      "Bash(curl -sk -o /tmp/bpe24_table_passage.csv \"https://www.insee.fr/fr/metadonnees/source/fichier/BPE24_table_passage.csv\")",
+      "Bash(curl -sk -I \"https://www.insee.fr/fr/statistiques/fichier/8217527/DS_BPE_CSV_FR.zip\")",
+      "Bash(curl -sk -o /tmp/DS_BPE_CSV_FR.zip \"https://www.insee.fr/fr/statistiques/fichier/8217527/DS_BPE_CSV_FR.zip\")",
+      "Bash(unzip -l /tmp/DS_BPE_CSV_FR.zip)",
+      "Read(//c/tmp/**)",
+      "Bash(unzip -o DS_BPE_CSV_FR.zip DS_BPE_2024_data.csv DS_BPE_2024_metadata.csv -d /tmp/bpe2024/)",
+      "Bash(grep '\"75056\".*\"COM\".*$code' /tmp/bpe2024/DS_BPE_2024_data.csv)",
+      "Bash(./node_modules/.bin/tsc --noEmit --project tsconfig.json)",
+      "Bash(cygpath -w /tmp/DS_BPE_CSV_FR.zip)"
     ]
   }
 }
