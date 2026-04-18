@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { deptName } from '@/lib/departments';
 
-export const revalidate = 86400;
+export const dynamic = 'force-dynamic';
 
 // ─── Prisma singleton ─────────────────────────────────────────────────────────
 

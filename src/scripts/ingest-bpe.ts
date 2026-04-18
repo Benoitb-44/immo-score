@@ -17,7 +17,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { inflateRawSync, createInflateRaw } from 'zlib';
+import { createInflateRaw } from 'zlib';
 import { createInterface } from 'readline';
 import { Readable } from 'stream';
 import { BPE_CODE_MAP, BPE_TYPEQUS, BPE_CODES, BPE_TOTAL } from '../lib/bpe-codes';
@@ -250,23 +250,26 @@ async function upsertAll(
       await prisma.$transaction(
         batch.map(([code, agg]) => {
           const data = buildUpsertData(code, agg);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           return prisma.bpeCommune.upsert({
             where:  { code_commune: code },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             create: data as any,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             update: data as any,
           });
         }),
       );
       inserted += batch.length;
-    } catch (e: unknown) {
+    } catch {
       // Relance commune par commune pour isoler l'erreur
       for (const [code, agg] of batch) {
         try {
           const data = buildUpsertData(code, agg);
           await prisma.bpeCommune.upsert({
             where:  { code_commune: code },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             create: data as any,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             update: data as any,
           });
           inserted++;
@@ -314,7 +317,7 @@ async function main(): Promise<IngestResult> {
   console.log(`[ingest-bpe] ${knownCommunes.size} communes référencées en base`);
 
   // 5. Upsert
-  const { inserted, skipped, errors } = await upsertAll(byCommune, knownCommunes);
+  const { inserted, errors } = await upsertAll(byCommune, knownCommunes);
 
   // 6. Stats finales
   const allBpe = await prisma.bpeCommune.findMany({
