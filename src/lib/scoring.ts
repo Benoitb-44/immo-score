@@ -4,32 +4,38 @@
  * Algorithme de score composite 0-100 par commune (ADR-IS-002, ADR-IS-005).
  *
  * Changements v3.1 vs v3 :
- *   DVF prix   : gaussienne centrée sur médiane nationale — exp(-0.7 × |delta/médiane|)
- *                (remplace goalpost inverse [800→100, 6000→0] qui sur-récompensait les
- *                 communes rurales à prix très bas et pénalisait les marchés tendus).
- *   DVF liq    : floor à 5 (évite score 0 sur communes peu actives).
- *   Risques    : floor à 10 quand score brut ≤ 0 — évite l'annihilation géométrique
- *                pour les communes à risques cumulés très élevés.
+ *   DVF prix   : gaussienne centrée sur médiane nationale — exp(-coef × |delta/médiane|)
+ *                Coef par défaut : 0.7 (modifiable via audit-gaussian).
+ *   DVF liq    : fenêtre 3 ans glissants + floor à 5 + seuil minimum 5 transactions
+ *                (évite faux positifs sur communes rurales à faible population).
+ *   Risques    : floor à 10 quand score brut ≤ 0 — évite l'annihilation géométrique.
+ *   Imputation : communes sans DVF (Alsace-Moselle, Mayotte) → médiane régionale DVF prix
+ *                puis fallback médiane nationale. Traçable via DvfDetails.imputed.
  *
  * Pondérations v3.1 : DVF 45%, DPE 10%, Risques 20%, BPE 25% (inchangées).
  * Agrégation géométrique pondérée — poids renormalisés sur dimensions présentes.
- * Dimensions manquantes → null (aucune imputation médiane).
- * Clip [1, 100] avant exponentiation pour éviter l'annihilation par zéro.
+ * Dimensions manquantes → null (aucune imputation), sauf DVF avec fallback régional.
  */
 
 import { PrismaClient, NiveauRisque } from '@prisma/client';
 import { BPE_TOTAL } from './bpe-codes';
+import { getRegionFromCodeInsee } from './geo-regions';
 
 // ─── Constantes DVF ───────────────────────────────────────────────────────────
 
-// Gaussienne prix : sigma implicite via coefficient 0.7 (delta=100% → score ~50)
-const DVF_LIQ_FULL  = 0.05;  // tx/hab ≥ → score liquidité 100
-const DVF_LIQ_FLOOR = 5;     // plancher liquidité — commune active au minimum
+/** Coefficient par défaut de la gaussienne prix (audit peut le faire varier). */
+export const DVF_GAUSSIAN_COEF = 0.7;
+/** Minimum de transactions sur 3 ans pour que le signal liquidité soit fiable. */
+const MIN_TX_RECENT = 5;
+/** tx/hab sur 3 ans ≥ → score liquidité 100. */
+const DVF_LIQ_FULL  = 0.05;
+/** Plancher liquidité — commune active au minimum, ou marché trop peu observé. */
+const DVF_LIQ_FLOOR = 5;
 
 // ─── Constantes DPE ───────────────────────────────────────────────────────────
 
-const DPE_NP_FLOOR = 40;   // % non-passoire ≤ → score 0
-const DPE_NP_CEIL  = 100;  // % non-passoire = → score 100
+const DPE_NP_FLOOR = 40;
+const DPE_NP_CEIL  = 100;
 
 // ─── Pondérations v3.1 ────────────────────────────────────────────────────────
 
@@ -62,7 +68,6 @@ function geometricScore(dims: Array<{ score: number; weight: number }>): number 
   const totalW = dims.reduce((s, d) => s + d.weight, 0);
   const product = dims.reduce((p, d) => {
     const w = d.weight / totalW;
-    // Clip [1, 100] : un score de 0 ne doit pas annuler tout le produit
     const s = clamp(d.score, 1, 100);
     return p * Math.pow(s / 100, w);
   }, 1);
@@ -72,40 +77,32 @@ function geometricScore(dims: Array<{ score: number; weight: number }>): number 
 // ─── Types publics ────────────────────────────────────────────────────────────
 
 export interface NationalMedians {
-  /** Médiane nationale des prix m² médians par commune — appartements */
   appart: number | null;
-  /** Médiane nationale des prix m² médians par commune — maisons */
   maison: number | null;
 }
 
 export interface DvfDetails {
-  /** Score dimension DVF 0-100 (null = pas de données DVF pour cette commune) */
   score: number | null;
-  /** Score sous-dimension prix (gaussienne centrée sur médiane nationale, 0-100) */
   score_prix: number | null;
-  /** Score sous-dimension liquidité (goalpost floor 5, 0-100) */
   score_liq: number | null;
-  /** Prix m² médian observé (€) — moyenne appart/maison si les deux existent */
   prix_m2_median: number | null;
-  /** Transactions par habitant */
   tx_per_hab: number | null;
-  /** Nombre de transactions brutes */
   nb_transactions: number | null;
+  /** true si score_dvf est une imputation régionale/nationale (pas de données DVF réelles) */
+  imputed?: boolean;
+  imputed_method?: 'regional_median' | 'national_median';
+  imputed_region?: string;
+  imputed_value?: number;
 }
 
 export interface DpeDetails {
-  /** Score dimension DPE 0-100 (null = pas de données DPE) */
   score: number | null;
-  /** % logements classés A, B, C, D ou E (non-passoires) */
   pct_non_passoire: number | null;
-  /** % logements classés A ou B (conservé pour affichage) */
   pct_ab: number | null;
-  /** Nombre total de logements avec DPE dans la commune */
   total_logements: number | null;
 }
 
 export interface RisquesDetails {
-  /** Score dimension risques 0-100 (null = commune absente de Géorisques) */
   score: number | null;
   tres_fort: number;
   fort: number;
@@ -114,14 +111,11 @@ export interface RisquesDetails {
 }
 
 export interface BpeDetails {
-  /** Score dimension BPE 0-100 (absent du dataset → 10 ; présent 0 équipement → 0) */
   score: number | null;
-  /** Nombre d'équipements essentiels présents sur 30 (null si absent du dataset) */
   total_equip_essentiels: number | null;
 }
 
 export interface ScoreDetails {
-  /** Score composite final 0-100 (arrondi à 1 décimale) */
   score: number;
   details: {
     dvf: DvfDetails;
@@ -135,12 +129,6 @@ export interface ScoreDetails {
 
 let _cachedNationalMedians: NationalMedians | null = null;
 
-/**
- * Calcule les médianes nationales DVF (médiane des médianes par commune).
- * Résultat mis en cache pour la durée du processus.
- * Appelé une fois avant le batch dans compute-scores.ts pour les logs ;
- * appelé automatiquement via calculateScore() pour les appels isolés (API, tests).
- */
 export async function fetchNationalMedians(client: PrismaClient): Promise<NationalMedians> {
   if (_cachedNationalMedians) return _cachedNationalMedians;
 
@@ -185,6 +173,7 @@ async function fetchDvfDetails(
   communeId: string,
   client: PrismaClient,
   nationalMedians: NationalMedians,
+  gaussianCoef: number = DVF_GAUSSIAN_COEF,
 ): Promise<DvfDetails> {
   const [prixRows, liqRows] = await Promise.all([
     client.$queryRaw<DvfPrixByTypeRow[]>`
@@ -221,7 +210,6 @@ async function fetchDvfDetails(
   const prixAppart = appartRow?.prix_m2_median ? parseFloat(appartRow.prix_m2_median) : null;
   const prixMaison = maisonRow?.prix_m2_median ? parseFloat(maisonRow.prix_m2_median) : null;
 
-  // Prix commune + médiane de référence (moyenne égale appart/maison si les deux existent)
   let prixCommune: number;
   let medianeRef: number;
 
@@ -236,22 +224,26 @@ async function fetchDvfDetails(
     medianeRef  = nationalMedians.maison ?? prixMaison!;
   }
 
-  // Gaussienne : communes proches de la médiane nationale → score ~100 ;
-  // écart relatif de 100% → score ~50 (exp(-0.7) ≈ 0.50)
+  // Gaussienne : communes proches de la médiane nationale → ~100 ; écart 100% → ~50 avec coef=0.7
   const delta     = medianeRef > 0 ? Math.abs(prixCommune - medianeRef) / medianeRef : 0;
-  const scorePrix = round1(100 * Math.exp(-0.7 * delta));
+  const scorePrix = round1(100 * Math.exp(-gaussianCoef * delta));
 
-  // Liquidité avec floor à 5
-  const txPerHab = liqRows.length > 0 && liqRows[0].tx_per_hab != null
+  const txPerHab  = liqRows.length > 0 && liqRows[0].tx_per_hab != null
     ? parseFloat(liqRows[0].tx_per_hab)
     : null;
-  const nbTx = liqRows.length > 0 ? parseInt(liqRows[0].nb_transactions) : null;
+  const nbTx      = liqRows.length > 0 ? parseInt(liqRows[0].nb_transactions) : 0;
 
-  // Si tx_per_hab est null (population absente ou 0), le signal liquidité est indisponible.
-  // On renormalise DVF sur score_prix uniquement — le poids global DVF (0.45) reste inchangé.
-  const scoreLiq = txPerHab != null
-    ? round1(Math.max(DVF_LIQ_FLOOR, clamp(txPerHab / DVF_LIQ_FULL * 100, 0, 100)))
-    : null;
+  // Si tx_per_hab null → signal liquidité absent, renormalisé sur prix uniquement.
+  // Si nbTx < MIN_TX_RECENT → marché trop peu observé sur 3 ans, floor liquidité.
+  // Évite que 2-3 ventes dans une commune de 50 hab créent un ratio tx/pop = 100%.
+  let scoreLiq: number | null;
+  if (txPerHab == null) {
+    scoreLiq = null;
+  } else if (nbTx < MIN_TX_RECENT) {
+    scoreLiq = DVF_LIQ_FLOOR;
+  } else {
+    scoreLiq = round1(Math.max(DVF_LIQ_FLOOR, clamp(txPerHab / DVF_LIQ_FULL * 100, 0, 100)));
+  }
 
   const score = scoreLiq != null
     ? round1(W_DVF.prix * scorePrix + W_DVF.liq * scoreLiq)
@@ -297,17 +289,9 @@ async function fetchDpeDetails(
 
   const pctNp = parseFloat(rows[0].pct_non_passoire);
   const pctAb = rows[0].pct_ab != null ? round1(parseFloat(rows[0].pct_ab)) : null;
+  const score = round1(clamp((pctNp - DPE_NP_FLOOR) / (DPE_NP_CEIL - DPE_NP_FLOOR) * 100, 0, 100));
 
-  const score = round1(
-    clamp((pctNp - DPE_NP_FLOOR) / (DPE_NP_CEIL - DPE_NP_FLOOR) * 100, 0, 100),
-  );
-
-  return {
-    score,
-    pct_non_passoire: round1(pctNp),
-    pct_ab:           pctAb,
-    total_logements:  total,
-  };
+  return { score, pct_non_passoire: round1(pctNp), pct_ab: pctAb, total_logements: total };
 }
 
 // ─── Requête Risques ──────────────────────────────────────────────────────────
@@ -329,7 +313,6 @@ async function fetchRisquesDetails(
   `;
 
   if (rows.length === 0) {
-    // Aucune entrée Géorisques = commune non couverte (pas "sans risque")
     return { score: null, tres_fort: 0, fort: 0, moyen: 0, faible: 0 };
   }
 
@@ -348,7 +331,6 @@ async function fetchRisquesDetails(
   const rawScore = 100 - malus;
   // Floor à 10 : cumul de risques très forts peut amener rawScore ≤ 0, ce qui
   // annulerait le score global en agrégation géométrique (0^w = 0 → global ≈ 0).
-  // Un plancher à 10 distingue "risques extrêmes" (10) de "données absentes" (null).
   const score = rawScore <= 0 ? 10 : rawScore;
 
   return { score, ...counts };
@@ -357,15 +339,8 @@ async function fetchRisquesDetails(
 // ─── Requête BPE ──────────────────────────────────────────────────────────────
 
 /**
- * Calcule le score BPE d'une commune.
- * Formule : totalEquipEssentiels / BPE_TOTAL × 100, capé à 100.
- *
- * Cas absent du dataset BPE 2024 niveau commune : floor à 10.
- * Motif : ~11 000 communes rurales (31%) ne figurent pas dans le fichier BPE
- * à maille commune — cela ne signifie pas "zéro équipement" mais "non mesuré".
- * Un floor à 10 évite que 0^0.25 = 0 annule le score global en agrégation
- * géométrique. Cas distinct des communes présentes avec 0 équipement essentiel
- * (vrai absence locale, score 0 justifié, < 500 communes).
+ * Calcule le score BPE. Floor à 10 pour communes absentes du dataset BPE 2024
+ * (~11 000 communes rurales non mesurées, distinct de "0 équipement").
  */
 async function fetchBpeDetails(
   communeId: string,
@@ -376,15 +351,9 @@ async function fetchBpeDetails(
     select: { total_equip_essentiels: true },
   });
 
-  if (!bpe) {
-    // Commune absente du dataset BPE 2024 → présence minimale non mesurée
-    return { score: 10, total_equip_essentiels: null };
-  }
+  if (!bpe) return { score: 10, total_equip_essentiels: null };
 
-  if (bpe.total_equip_essentiels === 0) {
-    // Présente dans BPE mais aucun des 30 équipements essentiels → vrai zéro
-    return { score: 0, total_equip_essentiels: 0 };
-  }
+  if (bpe.total_equip_essentiels === 0) return { score: 0, total_equip_essentiels: 0 };
 
   const score = round1(Math.min(100, (bpe.total_equip_essentiels / BPE_TOTAL) * 100));
   return { score, total_equip_essentiels: bpe.total_equip_essentiels };
@@ -397,15 +366,20 @@ const defaultClient = new PrismaClient();
 /**
  * Calcule le score composite (0-100) d'une commune française.
  *
- * @param communeId      Code INSEE de la commune (ex. "75056" pour Paris)
- * @param client         PrismaClient (optionnel, utilise le client par défaut)
- * @param nationalMedians Médianes nationales DVF pré-calculées (optionnel — lazy cache sinon)
- * @returns              ScoreDetails ou null si la commune n'existe pas
+ * @param communeId          Code INSEE de la commune (ex. "75056" pour Paris)
+ * @param client             PrismaClient (optionnel)
+ * @param nationalMedians    Médianes nationales DVF pré-calculées (lazy cache sinon)
+ * @param dvfFallbackByRegion Map région → score DVF prix médian (imputation pour communes sans DVF)
+ * @param dvfFallbackGlobal  Médiane nationale DVF prix (fallback ultime)
+ * @param gaussianCoef       Coefficient gaussien DVF prix (défaut 0.7, modifiable pour audit)
  */
 export async function calculateScore(
   communeId: string,
   client: PrismaClient = defaultClient,
   nationalMedians?: NationalMedians,
+  dvfFallbackByRegion?: Map<string, number>,
+  dvfFallbackGlobal?: number,
+  gaussianCoef: number = DVF_GAUSSIAN_COEF,
 ): Promise<ScoreDetails | null> {
   const commune = await client.commune.findUnique({
     where:  { code_insee: communeId },
@@ -415,14 +389,41 @@ export async function calculateScore(
 
   const medians = nationalMedians ?? await fetchNationalMedians(client);
 
-  const [dvf, dpe, risques, bpe] = await Promise.all([
-    fetchDvfDetails(communeId, client, medians),
+  const [dvfRaw, dpe, risques, bpe] = await Promise.all([
+    fetchDvfDetails(communeId, client, medians, gaussianCoef),
     fetchDpeDetails(communeId, client),
     fetchRisquesDetails(communeId, client),
     fetchBpeDetails(communeId, client),
   ]);
 
-  // Seules les dimensions avec données participent au score (pas d'imputation)
+  // Imputation DVF pour communes sans données (Alsace-Moselle, Mayotte)
+  let dvf: DvfDetails = dvfRaw;
+  if (dvf.score === null && (dvfFallbackByRegion != null || dvfFallbackGlobal != null)) {
+    const region = getRegionFromCodeInsee(communeId);
+    const imputedPrix = (region != null ? dvfFallbackByRegion?.get(region) : undefined)
+      ?? dvfFallbackGlobal;
+
+    if (imputedPrix != null) {
+      const method: 'regional_median' | 'national_median' =
+        region != null && dvfFallbackByRegion?.has(region)
+          ? 'regional_median'
+          : 'national_median';
+
+      dvf = {
+        score:           round1(W_DVF.prix * imputedPrix + W_DVF.liq * DVF_LIQ_FLOOR),
+        score_prix:      round1(imputedPrix),
+        score_liq:       DVF_LIQ_FLOOR,
+        prix_m2_median:  null,
+        tx_per_hab:      null,
+        nb_transactions: null,
+        imputed:         true,
+        imputed_method:  method,
+        imputed_region:  region ?? undefined,
+        imputed_value:   round1(imputedPrix),
+      };
+    }
+  }
+
   const dims: Array<{ score: number; weight: number }> = [];
   if (dvf.score     != null) dims.push({ score: dvf.score,     weight: W.dvf     });
   if (dpe.score     != null) dims.push({ score: dpe.score,     weight: W.dpe     });

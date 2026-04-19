@@ -273,6 +273,12 @@ model Score {
   computed_at       DateTime @default(now())
   version           Int      @default(1)
 
+  // Imputation DVF (communes sans données : Alsace-Moselle, Mayotte)
+  dvf_imputed        Boolean @default(false)
+  dvf_imputed_method String?
+  dvf_imputed_region String?
+  dvf_imputed_value  Float?
+
   updated_at DateTime @updatedAt
 
   commune Commune @relation(fields: [code_commune], references: [code_insee], onDelete: Cascade)
