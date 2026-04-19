@@ -19,7 +19,6 @@
 import fs from 'fs';
 import { PrismaClient } from '@prisma/client';
 import { calculateScore, fetchNationalMedians, DVF_GAUSSIAN_COEF, NationalMedians } from '../lib/scoring';
-import { getRegionFromCodeInsee } from '../lib/geo-regions';
 
 const prisma = new PrismaClient();
 const BATCH_SIZE = 100;
