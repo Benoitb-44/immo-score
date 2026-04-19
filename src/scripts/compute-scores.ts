@@ -27,17 +27,20 @@ const TEST_LIMIT = 10;
 const DEPTS_ARG = process.argv.find(a => a.startsWith('--depts='));
 const FILTER_DEPTS = DEPTS_ARG ? DEPTS_ARG.replace('--depts=', '').split(',').map(d => d.trim()) : null;
 
-// 20 communes témoins pour valider la distribution avant publication
+// 25 communes témoins pour valider la distribution avant publication
 const WITNESS_SLUGS = [
   // Grandes métropoles
   'paris', 'bordeaux', 'rennes', 'nantes', 'lyon', 'marseille', 'nice',
   // Villes moyennes
-  'rouen', 'toulouse', 'montpellier', 'strasbourg', 'nimes',
-  'caen', 'clermont-ferrand', 'limoges', 'poitiers', 'angers',
-  // Communes problématiques identifiées en v3
+  'angers', 'niort', 'angouleme', 'le-mans', 'tours',
+  'dijon', 'reims', 'metz', 'nancy', 'limoges', 'clermont-ferrand', 'pau',
+  // Témoin seuil haut
+  'poitiers',
+  // Communes à risque identifiées en v3
   'ambleon',      // Ambléon (01) — anciennement score = Bordeaux (absurde)
   'ile-d-yeu',    // L'Île-d'Yeu — risques côtiers
   'saint-juvin',  // Saint-Juvin (08) — Ardennes rural, ancien top 10 aberrant
+  'bandraboua',   // Bandraboua (976) — Mayotte
 ];
 
 interface ComputeResult {

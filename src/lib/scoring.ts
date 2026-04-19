@@ -203,6 +203,7 @@ async function fetchDvfDetails(
       JOIN immo_score.communes c ON c.code_insee = d.code_commune
       WHERE d.code_commune = ${communeId}
         AND d.prix_m2 IS NOT NULL AND d.prix_m2 > 0
+        AND d.date_mutation >= NOW() - INTERVAL '3 years'
       GROUP BY c.population
     `,
   ]);
