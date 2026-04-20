@@ -24,5 +24,6 @@ jobs:
             cd ~/cityrank
             git pull origin main
             docker compose build --no-cache
+            docker stop $(docker ps -q --filter "publish=3001") 2>/dev/null || true
             docker compose up -d
             docker image prune -f
