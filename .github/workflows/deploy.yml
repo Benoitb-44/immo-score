@@ -16,7 +16,11 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          script_stop: true
           script: |
+            if [ -d ~/immo-score ] && [ ! -d ~/cityrank ]; then
+              mv ~/immo-score ~/cityrank
+            fi
             cd ~/cityrank
             git pull origin main
             docker compose build --no-cache
