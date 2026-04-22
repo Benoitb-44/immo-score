@@ -255,6 +255,22 @@ model Demographie {
 }
 
 // ─────────────────────────────────────────────
+// Table 9 : insee_filosofi
+// Revenus médians par commune — Filosofi 2020 (INSEE)
+// Source : https://www.insee.fr/fr/statistiques/6692392
+// ─────────────────────────────────────────────
+
+model InseeFilosofi {
+  id            Int      @id @default(autoincrement())
+  code_commune  String   @unique
+  revenu_median Float    // MED20 : revenu médian par UC en €/an (Filosofi 2020)
+  annee         Int      @default(2020)
+  created_at    DateTime @default(now())
+
+  @@map("insee_filosofi")
+}
+
+// ─────────────────────────────────────────────
 // Table 8 : scores
 // Score composite calculé par commune (0–100)
 // Recalculé après chaque ingestion via compute-scores.ts

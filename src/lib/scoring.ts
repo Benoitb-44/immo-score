@@ -366,6 +366,74 @@ async function fetchBpeDetails(
   return { score, total_equip_essentiels: bpe.total_equip_essentiels };
 }
 
+// ─── Accessibilité financière (Median Multiple) ───────────────────────────────
+
+export interface AccessibiliteDetails {
+  score: number | null;
+  median_multiple: number | null;
+  prix_median_logement: number | null;
+  prix_median_m2: number | null;
+  revenu_median: number | null;
+}
+
+/** Surface proxy pour estimer le prix d'un logement médian à partir du prix m². */
+const SURFACE_PROXY_M2 = 65;
+
+/**
+ * Goalpost inversé : MM=2 → 100, MM=10 → 0.
+ * Un Median Multiple faible = logement accessible → score élevé.
+ */
+const MM_BEST  = 2;
+const MM_WORST = 10;
+
+/**
+ * Calcule le sous-score "Accessibilité financière" basé sur le Median Multiple.
+ *
+ * Median Multiple = (prix_m2_médian × surface_proxy) / revenu_médian_UC
+ * Goalpost inversé : MM=2 → 100, MM=10 → 0.
+ */
+export async function calculateAccessibiliteScore(
+  communeId: string,
+  client: PrismaClient = defaultClient,
+): Promise<AccessibiliteDetails> {
+  const [dvfRows, filosofiRow] = await Promise.all([
+    client.$queryRaw<Array<{ prix_m2_median: string | null }>>`
+      SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY prix_m2)::text AS prix_m2_median
+      FROM immo_score.dvf_prix
+      WHERE code_commune = ${communeId}
+        AND prix_m2 IS NOT NULL AND prix_m2 > 0
+    `,
+    client.$queryRaw<Array<{ revenu_median: string | null }>>`
+      SELECT revenu_median::text
+      FROM immo_score.insee_filosofi
+      WHERE code_commune = ${communeId}
+    `,
+  ]);
+
+  const prixM2Row     = dvfRows[0]?.prix_m2_median;
+  const revenuRow     = filosofiRow[0]?.revenu_median;
+
+  if (!prixM2Row || !revenuRow) {
+    return { score: null, median_multiple: null, prix_median_logement: null, prix_median_m2: null, revenu_median: null };
+  }
+
+  const prixM2              = parseFloat(prixM2Row);
+  const revenu              = parseFloat(revenuRow);
+  const prixLogement        = Math.round(prixM2 * SURFACE_PROXY_M2);
+  const medianMultiple      = round1(prixLogement / revenu);
+
+  // Goalpost inversé : score = (MM_WORST - MM) / (MM_WORST - MM_BEST) × 100
+  const score = round1(clamp((MM_WORST - medianMultiple) / (MM_WORST - MM_BEST) * 100, 0, 100));
+
+  return {
+    score,
+    median_multiple:      medianMultiple,
+    prix_median_logement: prixLogement,
+    prix_median_m2:       Math.round(prixM2),
+    revenu_median:        Math.round(revenu),
+  };
+}
+
 // ─── Fonction principale ──────────────────────────────────────────────────────
 
 const defaultClient = new PrismaClient();
