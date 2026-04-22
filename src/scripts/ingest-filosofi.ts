@@ -1,16 +1,23 @@
 /**
  * ingest-filosofi.ts
- * Ingestion des revenus médians par commune — INSEE Filosofi 2020.
+ * Ingestion des revenus médians par commune — INSEE Filosofi 2021 (dernier millésime disponible).
  *
- * Source principale : https://www.insee.fr/fr/statistiques/6692392
- * Champ clé : CODGEO (code INSEE 5 car.), MED20 (revenu médian €/an par UC)
+ * Note : Filosofi 2022 annulé par INSEE (suppression taxe d'habitation → impossibilité
+ * de chaîner ménages fiscaux ↔ logements). 2021 est le millésime le plus récent.
+ *
+ * Source : https://www.insee.fr/fr/statistiques/7756729
+ * Fichier ZIP : base-cc-filosofi-2021-geo2025_csv.zip
+ * Fichier CSV : DS_FILOSOFI_CC_data.csv (format long, séparateur ;)
+ * Champs : GEO (code INSEE 5 car.), FILOSOFI_MEASURE="MED_SL" → OBS_VALUE (€/an)
+ *
+ * Le parser détecte automatiquement le format :
+ *   - Format long 2021+ : colonnes GEO + FILOSOFI_MEASURE + OBS_VALUE
+ *   - Format large 2020  : colonnes CODGEO + MED20 (rétrocompatibilité LOCAL_FILOSOFI_PATH)
  *
  * Stratégie de téléchargement (par ordre de priorité) :
  *   0. Fichier local si LOCAL_FILOSOFI_PATH est défini (scp depuis VPS)
- *   1. INSEE   : indic-struct-distrib-revenu-2020-COMMUNES.zip
- *   2. data.gouv.fr : miroir du même ZIP
- *   3. opendatasoft  : export CSV plat (format différent, fallback de dernier recours)
- * Format détecté automatiquement par magic bytes (ZIP = PK\x03\x04, sinon CSV).
+ *   1. INSEE source officielle 2021
+ *   2. (pas d'autre miroir connu — utiliser LOCAL_FILOSOFI_PATH en cas d'échec)
  *
  * Usage :
  *   npm run ingest:filosofi
@@ -27,16 +34,12 @@ import { readFileSync, existsSync } from 'fs';
 
 const prisma = new PrismaClient();
 
-// Sources par ordre de priorité (ZIP ou CSV détecté automatiquement)
-// Fichier cible dans le ZIP : cc_filosofi_2020_COM.csv (séparateur ;, latin-1)
+// Sources par ordre de priorité (ZIP détecté automatiquement par magic bytes)
+// Fichier cible dans le ZIP : DS_FILOSOFI_CC_data.csv (format long, séparateur ;)
 const DOWNLOAD_SOURCES = [
   {
-    label: 'INSEE CSV (source officielle)',
-    url: 'https://www.insee.fr/fr/statistiques/fichier/6692392/base-cc-filosofi-2020_CSV.zip',
-  },
-  {
-    label: 'INSEE CSV historique (codes géo 2020)',
-    url: 'https://www.insee.fr/fr/statistiques/fichier/6692392/base-cc-filosofi-2020_CSV_histo.zip',
+    label: 'INSEE Filosofi 2021 (source officielle)',
+    url: 'https://www.insee.fr/fr/statistiques/fichier/7756729/base-cc-filosofi-2021-geo2025_csv.zip',
   },
 ];
 
@@ -94,7 +97,7 @@ async function fetchWithFallback(): Promise<FetchResult> {
   throw new Error(
     `Toutes les sources ont échoué. Pour contourner, télécharger manuellement puis scp :\n` +
     `  # Sur votre machine locale :\n` +
-    `  curl -L -o /tmp/filosofi.zip "https://www.insee.fr/fr/statistiques/fichier/6692392/base-cc-filosofi-2020_CSV.zip"\n` +
+    `  curl -L -o /tmp/filosofi.zip "https://www.insee.fr/fr/statistiques/fichier/7756729/base-cc-filosofi-2021-geo2025_csv.zip"\n` +
     `  scp /tmp/filosofi.zip ubuntu@37.59.122.208:/tmp/filosofi.zip\n` +
     `  # Sur le VPS :\n` +
     `  docker exec -e LOCAL_FILOSOFI_PATH=/tmp/filosofi.zip -it cityrank npm run ingest:filosofi\n\n` +
@@ -145,9 +148,10 @@ async function extractCsvFromZip(buf: Buffer): Promise<Readable> {
 
   if (entries.length === 0) throw new Error('Aucun CSV trouvé dans le ZIP');
 
-  // Préférer cc_filosofi_2020_COM.csv (données communes, sans intervalles de confiance)
-  const entry = entries.find(e => /cc_filosofi.*_COM\.csv$/i.test(e.filename))
-    ?? entries.find(e => e.filename.toUpperCase().includes('COM'))
+  // Préférer DS_FILOSOFI_CC_data.csv (données 2021+) ou cc_filosofi_*_COM.csv (2020 local)
+  const entry = entries.find(e => /DS_FILOSOFI_CC_data\.csv$/i.test(e.filename))
+    ?? entries.find(e => /cc_filosofi.*_COM\.csv$/i.test(e.filename))
+    ?? entries.find(e => /data\.csv$/i.test(e.filename))
     ?? entries[0];
   console.log(`  → Fichier extrait : ${entry.filename}`);
 
@@ -184,51 +188,86 @@ async function parseCsv(stream: Readable): Promise<FilosofiRow[]> {
   const rows: FilosofiRow[] = [];
 
   let headers: string[] = [];
+  let sep       = ';';
   let lineCount = 0;
-  let codgeoIdx = -1;
-  let med20Idx  = -1;
   let skipped   = 0;
   let secrets   = 0;
+
+  // Indices format large 2020 (CODGEO + MED20)
+  let codgeoIdx = -1;
+  let med20Idx  = -1;
+
+  // Indices format long 2021+ (GEO + FILOSOFI_MEASURE + OBS_VALUE)
+  let geoIdx     = -1;
+  let measureIdx = -1;
+  let valueIdx   = -1;
+  let isLongFormat = false;
 
   for await (const line of rl) {
     lineCount++;
     if (TEST_MODE && lineCount > TEST_LIMIT) break;
 
-    // Détecte le séparateur sur la première ligne (;  ou ,)
     if (lineCount === 1) {
-      const sep = line.includes(';') ? ';' : ',';
-      headers   = line.split(sep).map(h => h.trim().replace(/^"|"$/g, '').toUpperCase());
-      codgeoIdx = headers.indexOf('CODGEO');
-      med20Idx  = headers.indexOf('MED20');
+      sep     = line.includes(';') ? ';' : ',';
+      headers = line.split(sep).map(h => h.trim().replace(/^"|"$/g, '').toUpperCase());
 
-      if (codgeoIdx === -1) throw new Error(`Colonne CODGEO absente. Colonnes : ${headers.join(', ')}`);
-      if (med20Idx  === -1) throw new Error(`Colonne MED20 absente. Colonnes : ${headers.join(', ')}`);
+      // Détection automatique du format
+      if (headers.includes('FILOSOFI_MEASURE')) {
+        // Format long 2021+ : GEO + FILOSOFI_MEASURE + OBS_VALUE
+        isLongFormat = true;
+        geoIdx       = headers.indexOf('GEO');
+        measureIdx   = headers.indexOf('FILOSOFI_MEASURE');
+        valueIdx     = headers.indexOf('OBS_VALUE');
+        if (geoIdx === -1 || measureIdx === -1 || valueIdx === -1) {
+          throw new Error(`Format long 2021 : colonnes GEO/FILOSOFI_MEASURE/OBS_VALUE attendues. Colonnes reçues : ${headers.join(', ')}`);
+        }
+        console.log('  → Format détecté : long 2021+ (GEO + FILOSOFI_MEASURE + OBS_VALUE)');
+      } else {
+        // Format large 2020 : CODGEO + MED20
+        codgeoIdx = headers.indexOf('CODGEO');
+        med20Idx  = headers.indexOf('MED20');
+        if (codgeoIdx === -1 || med20Idx === -1) {
+          throw new Error(`Format inconnu. Colonnes : ${headers.join(', ')}`);
+        }
+        console.log('  → Format détecté : large 2020 (CODGEO + MED20)');
+      }
       continue;
     }
 
-    const sep  = line.includes(';') ? ';' : ',';
     const cols = line.split(sep).map(c => c.trim().replace(/^"|"$/g, ''));
-    if (cols.length < Math.max(codgeoIdx, med20Idx) + 1) continue;
 
-    const codgeo = cols[codgeoIdx];
-    const med20  = cols[med20Idx];
+    if (isLongFormat) {
+      // Format long 2021+ : ne garder que les lignes MED_SL (niveau de vie médian)
+      if (cols.length <= Math.max(geoIdx, measureIdx, valueIdx)) continue;
+      if (cols[measureIdx] !== 'MED_SL') continue;
 
-    // Garder uniquement les codes communes à 5 caractères (exclut EPCI "200...", dept "75", etc.)
-    if (codgeo.length !== 5) { skipped++; continue; }
+      const geo   = cols[geoIdx];
+      const value = cols[valueIdx];
 
-    // Filtrage département optionnel
-    if (FILTER_DEPT && !codgeo.startsWith(FILTER_DEPT)) continue;
+      if (geo.length !== 5) { skipped++; continue; }
+      if (FILTER_DEPT && !geo.startsWith(FILTER_DEPT)) continue;
 
-    // "s" = secret statistique, vide = non renseigné → skip (NULL, pas 0)
-    if (!med20 || med20 === 's' || med20 === 'nd' || med20 === 'ns') {
-      secrets++;
-      continue;
+      if (!value || value === 's' || value === 'nd' || value === 'ns') { secrets++; continue; }
+      const revenu = parseFloat(value.replace(',', '.'));
+      if (isNaN(revenu) || revenu <= 0) { secrets++; continue; }
+
+      rows.push({ code_commune: geo, revenu_median: revenu });
+    } else {
+      // Format large 2020
+      if (cols.length <= Math.max(codgeoIdx, med20Idx)) continue;
+
+      const codgeo = cols[codgeoIdx];
+      const med20  = cols[med20Idx];
+
+      if (codgeo.length !== 5) { skipped++; continue; }
+      if (FILTER_DEPT && !codgeo.startsWith(FILTER_DEPT)) continue;
+
+      if (!med20 || med20 === 's' || med20 === 'nd' || med20 === 'ns') { secrets++; continue; }
+      const revenu = parseFloat(med20.replace(',', '.'));
+      if (isNaN(revenu) || revenu <= 0) { secrets++; continue; }
+
+      rows.push({ code_commune: codgeo, revenu_median: revenu });
     }
-
-    const revenu = parseFloat(med20.replace(',', '.'));
-    if (isNaN(revenu) || revenu <= 0) { secrets++; continue; }
-
-    rows.push({ code_commune: codgeo, revenu_median: revenu });
   }
 
   console.log(`  → Lignes lues : ${lineCount} | communes valides : ${rows.length} | EPCI/dept skippés : ${skipped} | secrets/vides : ${secrets}`);
@@ -249,7 +288,7 @@ async function upsertBatch(rows: FilosofiRow[]): Promise<{ inserted: number; err
         SELECT * FROM UNNEST(
           ${batch.map(r => r.code_commune)}::text[],
           ${batch.map(r => r.revenu_median)}::float8[],
-          ${batch.map(() => 2020)}::int[],
+          ${batch.map(() => 2021)}::int[],
           ${batch.map(() => new Date())}::timestamptz[]
         ) AS t(code_commune, revenu_median, annee, created_at)
         ON CONFLICT (code_commune) DO UPDATE
@@ -274,7 +313,7 @@ async function upsertBatch(rows: FilosofiRow[]): Promise<{ inserted: number; err
 
 async function main(): Promise<void> {
   const t0 = Date.now();
-  console.log('=== INSEE Filosofi 2020 — ingestion ===');
+  console.log('=== INSEE Filosofi 2021 — ingestion ===');
   console.log(`Mode : ${TEST_MODE ? 'TEST' : 'PRODUCTION'}${FILTER_DEPT ? ` | Département ${FILTER_DEPT}` : ''}`);
 
   // 1. Acquisition des données (local → INSEE → data.gouv.fr → opendatasoft)
