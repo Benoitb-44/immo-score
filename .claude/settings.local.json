@@ -120,7 +120,9 @@
       "Bash(sed -i -e 's|~/cityrank|~/cityrank|g' -e 's|docker exec -it immo-score|docker exec -it cityrank|g' -e 's|docker exec cityrank|docker exec cityrank|g' -e 's|Benoitb-44/immo-score|Benoitb-44/cityrank|g' .claude/agents/data-engineer.md docs/agents/data-engineer.md)",
       "Bash(sed -i -e 's|repo `immo-score`|repo `cityrank`|g' -e 's|immo-score/|cityrank/|g' -e 's|Benoitb-44/immo-score|Benoitb-44/cityrank|g' docs/immo-score-os.md)",
       "Bash(sed -i 's/# immo-score/# cityrank/g' README.md)",
-      "Bash(npm test *)"
+      "Bash(npm test *)",
+      "Bash(git pull *)",
+      "Bash(git stash *)"
     ]
   }
 }
