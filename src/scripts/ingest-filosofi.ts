@@ -28,18 +28,15 @@ import { readFileSync, existsSync } from 'fs';
 const prisma = new PrismaClient();
 
 // Sources par ordre de priorité (ZIP ou CSV détecté automatiquement)
+// Fichier cible dans le ZIP : cc_filosofi_2020_COM.csv (séparateur ;, latin-1)
 const DOWNLOAD_SOURCES = [
   {
-    label: 'INSEE (source officielle)',
-    url: 'https://www.insee.fr/fr/statistiques/fichier/6692392/indic-struct-distrib-revenu-2020-COMMUNES.zip',
+    label: 'INSEE CSV (source officielle)',
+    url: 'https://www.insee.fr/fr/statistiques/fichier/6692392/base-cc-filosofi-2020_CSV.zip',
   },
   {
-    label: 'data.gouv.fr (miroir)',
-    url: 'https://www.data.gouv.fr/fr/datasets/r/f1b71d9b-3dae-4823-b8ab-4a359c448b31',
-  },
-  {
-    label: 'opendatasoft Île-de-France (CSV plat)',
-    url: 'https://data.opendatasoft.com/api/explore/v2.1/catalog/datasets/filosofi-2020-communes@datailedefrance/exports/csv',
+    label: 'INSEE CSV historique (codes géo 2020)',
+    url: 'https://www.insee.fr/fr/statistiques/fichier/6692392/base-cc-filosofi-2020_CSV_histo.zip',
   },
 ];
 
@@ -95,8 +92,11 @@ async function fetchWithFallback(): Promise<FetchResult> {
   }
 
   throw new Error(
-    `Toutes les sources ont échoué. Pour contourner, déposer le ZIP manuellement :\n` +
-    `  scp filosofi.zip ubuntu@37.59.122.208:/tmp/filosofi.zip\n` +
+    `Toutes les sources ont échoué. Pour contourner, télécharger manuellement puis scp :\n` +
+    `  # Sur votre machine locale :\n` +
+    `  curl -L -o /tmp/filosofi.zip "https://www.insee.fr/fr/statistiques/fichier/6692392/base-cc-filosofi-2020_CSV.zip"\n` +
+    `  scp /tmp/filosofi.zip ubuntu@37.59.122.208:/tmp/filosofi.zip\n` +
+    `  # Sur le VPS :\n` +
     `  docker exec -e LOCAL_FILOSOFI_PATH=/tmp/filosofi.zip -it cityrank npm run ingest:filosofi\n\n` +
     `Détail des erreurs :\n${errors.map(e => `  - ${e}`).join('\n')}`,
   );
@@ -145,8 +145,10 @@ async function extractCsvFromZip(buf: Buffer): Promise<Readable> {
 
   if (entries.length === 0) throw new Error('Aucun CSV trouvé dans le ZIP');
 
-  // Préférer le fichier contenant "COMMUNES" dans le nom
-  const entry = entries.find(e => e.filename.toUpperCase().includes('COMMUNES')) ?? entries[0];
+  // Préférer cc_filosofi_2020_COM.csv (données communes, sans intervalles de confiance)
+  const entry = entries.find(e => /cc_filosofi.*_COM\.csv$/i.test(e.filename))
+    ?? entries.find(e => e.filename.toUpperCase().includes('COM'))
+    ?? entries[0];
   console.log(`  → Fichier extrait : ${entry.filename}`);
 
   const compressed = buf.subarray(entry.start, entry.start + entry.compressedSize);
