@@ -37,49 +37,6 @@ const FILTER_DEPT  = DEPT_ARG ? DEPT_ARG.replace('--dept=', '').trim() : null;
 
 // ─── Parsing ZIP (Central Directory) ─────────────────────────────────────────
 
-function findZipEntry(
-  buf: Buffer,
-  targetFilename: string,
-): { start: number; compressedSize: number; method: number } | null {
-  let eocdPos = -1;
-  const searchStart = Math.max(0, buf.length - 65_558);
-  for (let i = buf.length - 22; i >= searchStart; i--) {
-    if (buf[i] === 0x50 && buf[i + 1] === 0x4b && buf[i + 2] === 0x05 && buf[i + 3] === 0x06) {
-      eocdPos = i;
-      break;
-    }
-  }
-  if (eocdPos === -1) return null;
-
-  const cdOffset = buf.readUInt32LE(eocdPos + 16);
-  const cdSize   = buf.readUInt32LE(eocdPos + 12);
-  let   pos      = cdOffset;
-  const cdEnd    = cdOffset + cdSize;
-
-  while (pos + 46 <= cdEnd) {
-    if (buf.readUInt32LE(pos) !== 0x02014b50) break;
-
-    const method        = buf.readUInt16LE(pos + 10);
-    const compressedSz  = buf.readUInt32LE(pos + 20);
-    const filenameLen   = buf.readUInt16LE(pos + 28);
-    const extraLen      = buf.readUInt16LE(pos + 30);
-    const commentLen    = buf.readUInt16LE(pos + 32);
-    const localOffset   = buf.readUInt32LE(pos + 42);
-    const filename      = buf.toString('utf8', pos + 46, pos + 46 + filenameLen);
-
-    if (filename.endsWith(targetFilename) || filename === targetFilename) {
-      // Lire l'en-tête local pour trouver le début des données
-      const lfnLen   = buf.readUInt16LE(localOffset + 26);
-      const lexLen   = buf.readUInt16LE(localOffset + 28);
-      const dataStart = localOffset + 30 + lfnLen + lexLen;
-      return { start: dataStart, compressedSize: compressedSz, method };
-    }
-
-    pos += 46 + filenameLen + extraLen + commentLen;
-  }
-  return null;
-}
-
 async function extractCsvFromZip(buf: Buffer): Promise<Readable> {
   // Cherche le premier fichier CSV dans le ZIP
   let eocdPos = -1;
@@ -218,7 +175,7 @@ async function upsertBatch(rows: FilosofiRow[]): Promise<{ inserted: number; err
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
     try {
-      const result = await prisma.$executeRaw`
+      await prisma.$executeRaw`
         INSERT INTO immo_score.insee_filosofi (code_commune, revenu_median, annee, created_at)
         SELECT * FROM UNNEST(
           ${batch.map(r => r.code_commune)}::text[],
