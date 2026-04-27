@@ -503,7 +503,7 @@ comparateur, blog, page d'accueil
 ```
 // Bonne approche : une feature par session
 @frontend crée uniquement la page /commune/[slug] avec les 7 sections 
-définies dans docs/agents/frontend.md
+définies dans .claude/agents/frontend.md
 ```
 
 ---
