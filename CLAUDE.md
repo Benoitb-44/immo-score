@@ -1,155 +1,84 @@
 # CLAUDE.md — CityRank
 
+> Point d'entrée pour toute session Claude Code. À lire en début de session.
+
 ## Projet
 
 CityRank est un site de SEO programmatique immobilier qui génère automatiquement une page pour chaque commune de France (~35 000) avec un score d'attractivité immobilière (0-100) basé exclusivement sur des données publiques open data.
 
-**URL** : cityrank.fr (production) — repo cloné dans ~/cityrank sur le VPS OVH
-**Repo** : github.com/Benoitb-44/cityrank
-**Fondateur** : Benoît — solo non-technical founder, ne code pas, délègue tout aux agents Claude Code.
+- **URL prod** : cityrank.fr
+- **VPS** : OVH 37.59.122.208, dossier `~/cityrank`, port 3001
+- **Repo** : github.com/Benoitb-44/cityrank
+- **Fondateur** : Benoît — solo non-technical, pilote via agents Claude Code
 
-## Stack Technique
+## Stack technique
 
-- **Frontend/SSR** : Next.js 14 (App Router) + TypeScript + Tailwind CSS
-- **ORM** : Prisma
-- **BDD** : PostgreSQL (schéma `immo_score` sur le VPS OVH partagé avec Homilink)
-- **Conteneur** : Docker Compose (fichier séparé de Homilink)
-- **CI/CD** : GitHub Actions → deploy sur OVH VPS
-- **Reverse proxy** : nginx (server block dédié)
-- **Orchestration données** : n8n (n8n.homilink.fr)
-- **Analytics** : Umami (self-hosted, RGPD)
+Next.js 14 (App Router) + TypeScript + Tailwind + Prisma + PostgreSQL (schéma `immo_score`) + Docker Compose + GitHub Actions + nginx + n8n.
 
-## Architecture Clé
+## Architecture en 4 lignes
 
-### Pipeline de Données
-6 sources open data → scripts d'ingestion TypeScript → PostgreSQL → score composite → pages ISR Next.js
+1. **Pipeline** : 6 sources open data → scripts TS d'ingestion → PostgreSQL → score composite → pages ISR Next.js
+2. **SEO programmatique** : `/commune/[slug]` ISR `revalidate: 86400` + sitemap dynamique 35k pages + JSON-LD
+3. **Score 0-100** : géométrique pondéré (DVF 45%, BPE 20%, DPE 10%, Risques 25%) avec floor=10, normalisation percentile rank
+4. **Isolation** : schéma PG séparé, Docker Compose dédié, nginx reverse proxy dédié (cityrank-nginx depuis 27/04/2026)
 
-Sources : DVF (prix m²), API DPE ADEME (performance énergétique), BPE INSEE (équipements), Géorisques (risques naturels), data.economie.gouv (taxe foncière), INSEE (démographie).
+## Documentation détaillée
 
-### SEO Programmatique
-- Route `/commune/[slug]` avec ISR `revalidate: 86400` (24h)
-- Sitemap dynamique `/sitemap.xml` pour ~35 000 pages
-- Structured data JSON-LD sur chaque page
-- Internal linking : communes voisines + même département
+| Sujet | Fichier |
+|-------|---------|
+| Règles d'architecture & style | `.claude/memory/rules.md` |
+| Pièges actifs à éviter | `.claude/memory/pitfalls.md` |
+| Patterns validés | `.claude/memory/solutions.md` |
+| Historique des décisions mémoire | `.claude/memory/changelog.md` |
+| Contexte fondateur & sprint en cours | `.claude/memory/project_sprint0.md`, `.claude/memory/user_founder.md` |
+| Agents disponibles | `.claude/agents/*.md` |
+| Commandes slash | `.claude/commands/*.md` |
+| ADR (décisions structurantes) | `docs/adr/*.md` |
+| Document fondateur (vision produit) | `docs/immo-score-os.md` |
+| Skills (patterns réutilisables) | `docs/data-ingestion.md`, `docs/seo-programmatic.md`, `docs/score-algorithm.md` |
+| Journal technique des sessions | `docs/journal.md` |
 
-### Score Composite (0-100)
-Score pondéré normalisé sur 6 dimensions :
-- Prix attractifs (25%) — normalisation inverse prix m²
-- Performance DPE (15%) — % logements A-C
-- Fiscalité légère (15%) — normalisation inverse taxe foncière
-- Équipements (20%) — score composite / 1000 hab
-- Risques faibles (10%) — normalisation inverse risques
-- Dynamisme démo (15%) — croissance pop + revenus + emploi
+## Conventions essentielles
 
-Normalisation par percentile rank, puis somme pondérée.
+- **Conventional commits** : `feat:`, `fix:`, `data:`, `seo:`, `docs:`, `test:`, `chore:` + tag `[memory]` pour mises à jour de `.claude/memory/`
+- **Branches** : `main` = prod (auto-deploy), `claude/[description]-[id]` pour les features, squash merge obligatoire
+- **PR** : review par `@code-reviewer` avant merge dans `main`
+- **TypeScript strict**, pas de `any`
+- **Idempotence** : tous les scripts d'ingestion utilisent UPSERT
+- **NULL ≠ 0** : une commune sans donnée a NULL, pas 0
 
-### Isolation avec Homilink
-- Schéma PostgreSQL séparé : `immo_score`
-- Docker Compose séparé : `docker-compose.immo.yml`
-- Repo GitHub séparé
-- Server block nginx séparé
-- Aucune dépendance de code entre les deux projets
+## Post-session protocol
 
-## Conventions
+À la fin de chaque session, mettre à jour dans cet ordre :
+1. `docs/journal.md` — bloc daté résumant les modifications (remplace l'ancien "État du Site" Notion)
+2. `docs/adr/` — créer un ADR si décision structurante
+3. `.claude/memory/changelog.md` — si une règle/pitfall/solution a évolué
 
-### Git
-- Branch `main` = production
-- Branches feature : `claude/[description]-[id]`
-- PR obligatoire avec review par @code-reviewer
-- Conventional commits : `feat:`, `fix:`, `data:`, `seo:`, `docs:`
+## Agents disponibles (référence rapide)
 
-### Code
-- TypeScript strict mode
-- Prisma pour toutes les requêtes BDD (sauf agrégations complexes → raw SQL)
-- Composants React : fonction + export default
-- Pas de `'use client'` sauf nécessité absolue (SearchBar, Comparateur)
-- Tailwind uniquement pour le styling, pas de CSS modules
-- Tests : Vitest + Testing Library
+| Agent | Domaine |
+|-------|---------|
+| `@cto` | Architecture, ADRs, performance, scalabilité |
+| `@frontend` | Pages Next.js, composants React, SEO technique |
+| `@backend` | API routes, Prisma, PostgreSQL |
+| `@data-engineer` | Pipeline d'ingestion, scoring, qualité données |
+| `@code-reviewer` | Review PR avant merge |
+| `@test-writer` | Tests unitaires & intégration |
 
-### Données
-- Chaque script d'ingestion est idempotent (upsert, pas insert)
-- Chaque table a un champ `updated_at`
-- Le score est recalculé après chaque ingestion via `compute-scores.ts`
-- Les données brutes ne sont jamais supprimées, seulement écrasées
+> **Note Sprint B (à venir)** : refonte vers `@dev` + `@reviewer` + `@ops` + skills spécialisés (`security-audit`, `perf-audit`, `a11y-check`, `seo-validation`, `data-quality-check`).
 
-### SEO
-- Chaque page commune a un `<title>` unique : "Immobilier [Commune] : Score, Prix, DPE, Risques | CityRank"
-- Meta description dynamique avec score et prix m²
-- Schema.org JSON-LD : `Place` + `PropertyValue` pour le score
-- Canonical URL obligatoire
-- Pas de contenu dupliqué entre pages (le template varie selon les données)
-
-## Commandes Utiles
-
-```bash
-# Dev local
-npm run dev                    # Next.js dev server
-npm run db:push                # Prisma push schema
-npm run db:seed                # Seed communes de référence
-
-# Ingestion données
-npm run ingest:communes        # Table de référence COG
-npm run ingest:dvf             # Prix m² DVF
-npm run ingest:dpe             # DPE ADEME
-npm run ingest:bpe             # Équipements BPE
-npm run ingest:risques         # Géorisques
-npm run ingest:fiscalite       # Taxe foncière
-npm run ingest:demo            # Démographie INSEE
-npm run compute:scores         # Calcul score composite
-
-# Production
-make deploy                    # Deploy via GitHub Actions
-make logs                      # Logs Docker
-make ssh                       # SSH vers VPS
-```
-
-## Agents Disponibles
-
-- **@cto** : Architecture, ADRs, choix techniques, performance
-- **@frontend** : Composants React, pages Next.js, Tailwind, SEO technique
-- **@backend** : API routes, Prisma, scripts d'ingestion, PostgreSQL
-- **@data-engineer** : Pipeline de données, scripts d'ingestion, qualité données, algorithme score
-- **@code-reviewer** : Review PR, qualité code, conventions
-- **@test-writer** : Tests unitaires, tests d'intégration, fixtures données
-
-## ADRs
+## ADRs actifs
 
 - ADR-IS-001 : Stack Technique (Next.js 14 + PostgreSQL + Prisma + Docker/OVH)
 - ADR-IS-002 : ISR Strategy (revalidate 24h + on-demand)
 - ADR-IS-003 : Isolation Homilink / CityRank
 - ADR-IS-004 : Pipeline d'Ingestion Données (scripts TS + n8n)
-- ADR-IS-005 : Algorithme Score Composite (pondéré 6 dimensions)
+- ADR-IS-005 : Algorithme Score Composite (pondéré 6 dimensions, v3.1 géométrique)
+- ADR-006 : Accès BDD read-only via MCP (`cityrank_ro` + `mcp-db.cityrank.fr`)
 
-## Context Important
+## Contraintes business
 
-- Le fondateur ne code pas — il pilote via les agents. Toute décision technique doit être justifiée et documentée.
-- Budget infra < 50€/mois — le VPS est partagé avec Homilink.
-- Hébergement France obligatoire (OVH) — souveraineté données.
-- Le SEO programmatique est le cœur du projet : chaque décision technique doit être évaluée à travers le prisme "est-ce que ça aide le SEO ?".
-- Les données sont publiques (open data) — pas de problème de licence, mais citation des sources obligatoire sur chaque page.
-
-## Post-session Protocol
-
-À la fin de chaque session de travail, mettre à jour la page Notion **"État du Site"** (ID : `345407e4-9119-8177-803b-ddf2ec2f389b`) avec un résumé des modifications effectuées.
-
-### Contenu à documenter dans Notion
-
-- **Routes modifiées** : lister les fichiers `app/**/page.tsx` ou `app/**/route.ts` touchés
-- **Composants modifiés** : lister les composants React créés ou modifiés
-- **Bugs corrigés** : décrire brièvement le bug et la correction appliquée
-- **Scripts de données** : indiquer si des scripts d'ingestion ou `compute-scores.ts` ont été modifiés
-- **Schéma BDD** : signaler tout changement de schéma Prisma
-- **Date** : horodatage de la session (date du jour)
-
-### Format de mise à jour Notion
-
-Utiliser l'outil MCP Notion (si disponible) ou fournir à Benoît un bloc Markdown prêt à coller dans la page :
-
-```
-## Session [DATE]
-**Agent(s)** : @[agent utilisé]
-**Modifications** :
-- [composant/route] : [description courte]
-**Bugs corrigés** : [description ou "aucun"]
-**À surveiller** : [régressions potentielles ou points d'attention]
-```
+- Budget infra < 50€/mois — VPS OVH partagé (Homilink en pause)
+- Hébergement France obligatoire — souveraineté données
+- Le SEO programmatique est le cœur du business : chaque décision technique doit améliorer le SEO ou ne pas le dégrader
+- Les données sont publiques (open data) — citation des sources obligatoire sur chaque page
