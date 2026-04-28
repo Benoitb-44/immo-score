@@ -34,11 +34,16 @@ import { readFileSync, existsSync } from 'fs';
 
 const prisma = new PrismaClient();
 
-// Sources par ordre de priorité (ZIP détecté automatiquement par magic bytes)
-// Fichier cible dans le ZIP : DS_FILOSOFI_CC_data.csv (format long, séparateur ;)
+// Millésime cible : 2021 (dernier disponible — Filosofi 2022 annulé par INSEE,
+// suppression taxe d'habitation → impossible de chaîner ménages fiscaux ↔ logements).
+// NE PAS changer pour "dernière version disponible" : 2021 est l'ancrage cohérent
+// avec la fenêtre DVF 2022-2024 et les données Cerema.
+const FILOSOFI_ANNEE = 2021;
+
 const DOWNLOAD_SOURCES = [
   {
     label: 'INSEE Filosofi 2021 (source officielle)',
+    // URL stable INSEE — ne pas substituer par un lien "dernière version"
     url: 'https://www.insee.fr/fr/statistiques/fichier/7756729/base-cc-filosofi-2021-geo2025_csv.zip',
   },
 ];
@@ -312,7 +317,7 @@ async function upsertBatch(rows: FilosofiRow[]): Promise<{ inserted: number; err
         SELECT * FROM UNNEST(
           ${batch.map(r => r.code_commune)}::text[],
           ${batch.map(r => r.revenu_median)}::float8[],
-          ${batch.map(() => 2021)}::int[],
+          ${batch.map(() => FILOSOFI_ANNEE)}::int[],
           ${batch.map(() => new Date())}::timestamptz[]
         ) AS t(code_commune, revenu_median, annee, created_at)
         ON CONFLICT (code_commune) DO UPDATE
@@ -327,7 +332,7 @@ async function upsertBatch(rows: FilosofiRow[]): Promise<{ inserted: number; err
         SELECT
           gen_random_uuid()::text,
           t.commune_id, t.median_uc, t.taux_pauvrete, t.population,
-          2021::int, NOW()
+          ${FILOSOFI_ANNEE}::int, NOW()
         FROM UNNEST(
           ${batch.map(r => r.code_commune)}::text[],
           ${batch.map(r => r.revenu_median)}::float8[],

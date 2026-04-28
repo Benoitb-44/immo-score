@@ -1,35 +1,32 @@
 /**
- * compute-accessibilite.ts — Sprint 4-A
+ * compute-accessibilite.ts — Sprint 4-A patch
  *
  * Calcul batch du score d'accessibilité financière (0-100) pour toutes les communes.
+ * Unité : années de revenu disponible par UC (≈ "Median Multiple UC").
  *
- * Algorithme en 3 passes :
+ * Hiérarchie 4 niveaux :
  *
- *   Passe 1 — calcul propre (données DVF + Filosofi propres à la commune) :
- *     MM = commune.prix_tx_median3y / (filosofi_communes.median_uc × 1.5)
- *     imputed = false
+ *   Niveau 1 — Cerema DV3F 2022-2024 (meilleure source, imputed=false) :
+ *     commune dans cerema_accessibilite → MM = min(d5_appartement, d5_maison)
+ *     method = 'cerema_aav_d5_2022_2024'
  *
- *   Passe 2 — fallback Cerema AAV :
- *     Si commune.aav_code ∈ cerema_accessibilite →
- *       MM = cerema.mm_aav, imputed = true, method = 'cerema_aav'
+ *   Niveau 2 — DVF + Filosofi 2021 (imputed=true) :
+ *     MM = prix_tx_median3y / median_uc_filosofi_2021
+ *     method = 'dvf_filosofi'
  *
- *   Passe 3 — médiane régionale puis nationale :
- *     Communes encore sans MM → médiane régionale calculée depuis passe 1
- *     Fallback ultime : médiane nationale
- *     imputed = true, method = 'regional_median' | 'national_median'
+ *   Niveau 3 — médiane départementale des niveaux 1+2 (imputed=true) :
+ *     method = 'regional_median'
  *
- * Scoring (paliers Demographia) :
- *   MM ≤ 3.0                  : score = 100
- *   MM 3.0–4.0  (modéré)      : score = 100 → 75  (interpolation linéaire)
- *   MM 4.0–5.0  (sérieux)     : score = 75  → 50
- *   MM 5.0–6.0  (sévère)      : score = 50  → 25
- *   MM 6.0–10.0 (inaccessible): score = 25  → 0
- *   MM > 10.0                 : score = 0
- *   Floor = 10 (évite annihilation géométrique)
+ *   Niveau 4 — médiane nationale (fallback ultime, imputed=true) :
+ *     method = 'national_median'
+ *
+ * Paliers interpolation linéaire (unité : années de revenu UC) :
+ *   [(0, 100), (4.5, 90), (6.0, 75), (7.5, 55), (13.5, 30), (∞, 10)]
+ *   Floor 10 strict.
  *
  * Flags CLI :
  *   --test            10 premières communes (dev)
- *   --witnesses       Communes témoins (Paris/Lyon/Rennes/…)
+ *   --witnesses       Communes témoins uniquement
  *   --depts=33,69     Départements ciblés
  *   --dry-run         Calcule mais n'écrit pas en base
  */
@@ -39,84 +36,99 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 const BATCH_SIZE = 100;
 
-const TEST_MODE    = process.argv.includes('--test');
+const TEST_MODE      = process.argv.includes('--test');
 const WITNESSES_MODE = process.argv.includes('--witnesses');
-const DRY_RUN      = process.argv.includes('--dry-run');
-const DEPTS_ARG    = process.argv.find(a => a.startsWith('--depts='));
-const FILTER_DEPTS = DEPTS_ARG ? DEPTS_ARG.replace('--depts=', '').split(',').map(d => d.trim()) : null;
+const DRY_RUN        = process.argv.includes('--dry-run');
+const DEPTS_ARG      = process.argv.find(a => a.startsWith('--depts='));
+const FILTER_DEPTS   = DEPTS_ARG ? DEPTS_ARG.replace('--depts=', '').split(',').map(d => d.trim()) : null;
 
-// 10 communes témoins spec Sprint 4-A
-const WITNESS_COMMUNES: Record<string, { name: string; expected_mm: number; expected_score_min: number; expected_score_max: number }> = {
-  '19272': { name: 'Tulle',        expected_mm: 3.5, expected_score_min: 80, expected_score_max: 95 },
-  '72181': { name: 'Le Mans',      expected_mm: 4.5, expected_score_min: 60, expected_score_max: 75 },
-  '35238': { name: 'Rennes',       expected_mm: 6.5, expected_score_min: 38, expected_score_max: 53 },
-  '24322': { name: 'Sarlat',       expected_mm: 5.0, expected_score_min: 48, expected_score_max: 58 },
-  '33063': { name: 'Bordeaux',     expected_mm: 7.5, expected_score_min: 23, expected_score_max: 38 },
-  '69123': { name: 'Lyon',         expected_mm: 7.5, expected_score_min: 23, expected_score_max: 38 },
-  '75056': { name: 'Paris',        expected_mm: 10,  expected_score_min: 10, expected_score_max: 15 },
-  '08392': { name: 'Saint-Juvin',  expected_mm: 2.5, expected_score_min: 87, expected_score_max: 97 },
-  '03310': { name: 'Vichy',        expected_mm: 4.0, expected_score_min: 68, expected_score_max: 82 },
-  '83069': { name: 'Hyères',       expected_mm: 7.5, expected_score_min: 23, expected_score_max: 38 },
+// ─── Communes témoins (PATCH 5 — fenêtre 2022-2024, unité années UC) ─────────
+
+const WITNESS_COMMUNES: Record<string, {
+  name: string;
+  expected_mm: number;
+  expected_score_min: number;
+  expected_score_max: number;
+}> = {
+  '19272': { name: 'Tulle',       expected_mm: 5.0,  expected_score_min: 83, expected_score_max: 93 },
+  '72181': { name: 'Le Mans',     expected_mm: 6.5,  expected_score_min: 62, expected_score_max: 72 },
+  '35238': { name: 'Rennes',      expected_mm: 9.0,  expected_score_min: 44, expected_score_max: 54 },
+  '24322': { name: 'Sarlat',      expected_mm: 8.5,  expected_score_min: 45, expected_score_max: 55 },
+  '33063': { name: 'Bordeaux',    expected_mm: 13.5, expected_score_min: 25, expected_score_max: 35 },
+  '69123': { name: 'Lyon',        expected_mm: 13.0, expected_score_min: 27, expected_score_max: 37 },
+  '75056': { name: 'Paris',       expected_mm: 18.0, expected_score_min: 10, expected_score_max: 15 },
+  '08392': { name: 'Saint-Juvin', expected_mm: 5.0,  expected_score_min: 30, expected_score_max: 80 }, // hors AAV → médiane régionale
+  '03310': { name: 'Vichy',       expected_mm: 6.7,  expected_score_min: 60, expected_score_max: 70 },
+  '83069': { name: 'Hyères',      expected_mm: 13.5, expected_score_min: 25, expected_score_max: 35 },
 };
 
-// ─── Scoring Demographia (paliers linéaires) ──────────────────────────────────
+// ─── Scoring (paliers linéaires, unité : années revenu UC) ────────────────────
 
 const FLOOR_SCORE = 10;
 
+// Breakpoints : [mm_seuil, score_au_seuil]
+const BREAKPOINTS: [number, number][] = [
+  [0,    100],
+  [4.5,   90],
+  [6.0,   75],
+  [7.5,   55],
+  [13.5,  30],
+];
+
 /**
- * Convertit un Median Multiple en score 0-100 selon les paliers Demographia.
- * Floor à 10 pour éviter l'annihilation géométrique dans un futur score global.
+ * Convertit un nombre d'années de revenu UC en score 0-100.
+ * Interpolation linéaire entre les paliers Cerema/DV3F.
+ * Floor 10 strict pour éviter l'annihilation dans le score géométrique global.
  */
 function mmToScore(mm: number): number {
-  let raw: number;
-  if      (mm <= 3.0)  raw = 100;
-  else if (mm <= 4.0)  raw = 100 - ((mm - 3.0) / 1.0) * 25; // 100 → 75
-  else if (mm <= 5.0)  raw = 75  - ((mm - 4.0) / 1.0) * 25; // 75  → 50
-  else if (mm <= 6.0)  raw = 50  - ((mm - 5.0) / 1.0) * 25; // 50  → 25
-  else if (mm <= 10.0) raw = 25  - ((mm - 6.0) / 4.0) * 25; // 25  → 0
-  else                 raw = 0;
+  if (mm <= BREAKPOINTS[0][0]) return 100;
 
-  return Math.max(FLOOR_SCORE, Math.round(raw * 10) / 10);
+  for (let i = 0; i < BREAKPOINTS.length - 1; i++) {
+    const [x0, y0] = BREAKPOINTS[i];
+    const [x1, y1] = BREAKPOINTS[i + 1];
+    if (mm <= x1) {
+      const raw = y0 + ((mm - x0) / (x1 - x0)) * (y1 - y0);
+      return Math.max(FLOOR_SCORE, Math.round(raw * 10) / 10);
+    }
+  }
+
+  // Au-delà du dernier breakpoint → floor
+  return FLOOR_SCORE;
 }
 
-// ─── Pré-chargement données agrégées ─────────────────────────────────────────
+// ─── Chargement des données ───────────────────────────────────────────────────
 
 interface CommuneData {
   code_insee:       string;
   region:           string;
   prix_tx_median3y: number | null;
-  aav_code:         string | null;
   median_uc:        number | null;
 }
 
-interface CeremaData {
-  mm_aav: number;
+interface CeremaComData {
+  d5_appart: number | null;
+  d5_maison: number | null;
 }
 
 async function loadAllData(): Promise<{
-  communes:       Map<string, CommuneData>;
-  ceremaByAav:    Map<string, CeremaData>;
+  communes:        Map<string, CommuneData>;
+  ceremaByCommune: Map<string, CeremaComData>;
 }> {
   console.log('[compute-accessibilite] Chargement des données...');
 
-  // Communes avec prix_tx + aav_code
   const communeRows = await prisma.$queryRaw<Array<{
-    code_insee: string;
-    region: string;
+    code_insee:       string;
+    region:           string;
     prix_tx_median3y: string | null;
-    aav_code: string | null;
   }>>`
-    SELECT code_insee, region,
-           prix_tx_median3y::text,
-           aav_code
+    SELECT code_insee, region, prix_tx_median3y::text
     FROM immo_score.communes
     ORDER BY code_insee
   `;
 
-  // Revenus médians Filosofi v4
   const filosofiRows = await prisma.$queryRaw<Array<{
     commune_id: string;
-    median_uc: string;
+    median_uc:  string;
   }>>`
     SELECT commune_id, median_uc::text
     FROM immo_score.filosofi_communes
@@ -127,18 +139,23 @@ async function loadAllData(): Promise<{
     if (!isNaN(v) && v > 0) filosofiMap.set(r.commune_id, v);
   }
 
-  // Cerema AAV
+  // Cerema indexé par commune_id (niveau 1 — données directes par commune)
   const ceremaRows = await prisma.$queryRaw<Array<{
-    aav_code: string;
-    mm_aav: string;
+    commune_id: string;
+    d5_appart:  string | null;
+    d5_maison:  string | null;
   }>>`
-    SELECT aav_code, mm_aav::text
+    SELECT commune_id, d5_appart::text, d5_maison::text
     FROM immo_score.cerema_accessibilite
   `;
-  const ceremaByAav = new Map<string, CeremaData>();
+  const ceremaByCommune = new Map<string, CeremaComData>();
   for (const r of ceremaRows) {
-    const mm = parseFloat(r.mm_aav);
-    if (!isNaN(mm) && mm > 0) ceremaByAav.set(r.aav_code, { mm_aav: mm });
+    const d5a = r.d5_appart  ? parseFloat(r.d5_appart)  : null;
+    const d5m = r.d5_maison  ? parseFloat(r.d5_maison)  : null;
+    ceremaByCommune.set(r.commune_id, {
+      d5_appart: d5a && !isNaN(d5a) && d5a > 0 ? d5a : null,
+      d5_maison: d5m && !isNaN(d5m) && d5m > 0 ? d5m : null,
+    });
   }
 
   const communes = new Map<string, CommuneData>();
@@ -148,88 +165,80 @@ async function loadAllData(): Promise<{
       code_insee:       r.code_insee,
       region:           r.region,
       prix_tx_median3y: prix && prix > 0 ? prix : null,
-      aav_code:         r.aav_code,
       median_uc:        filosofiMap.get(r.code_insee) ?? null,
     });
   }
 
   console.log(
     `[compute-accessibilite] Communes : ${communes.size} | ` +
-    `Filosofi v4 : ${filosofiMap.size} | Cerema AAV : ${ceremaByAav.size}`,
+    `Filosofi 2021 : ${filosofiMap.size} | Cerema direct : ${ceremaByCommune.size}`,
   );
 
-  return { communes, ceremaByAav };
+  return { communes, ceremaByCommune };
 }
 
-// ─── Médianes régionales (pour passe 3) ──────────────────────────────────────
+// ─── Médianes départementales (pour niveau 3) ─────────────────────────────────
 
 interface ComputedScore {
-  code_insee:   string;
-  mm:           number;
-  score:        number;
-  imputed:      boolean;
-  method:       string;
-  aav_code_used?: string;
+  code_insee:    string;
+  mm:            number;
+  score:         number;
+  imputed:       boolean;
+  method:        string;
 }
 
-function computeRegionalMedians(passe1Results: ComputedScore[]): Map<string, number> {
-  const byRegion = new Map<string, number[]>();
-
-  for (const r of passe1Results) {
-    if (!r.imputed) {
-      // Récupérer la région n'est pas dans ComputedScore directement,
-      // on la recompose depuis le code_insee (2 premiers chars = dept → région)
-      // Pour l'instant on utilise le code département comme proxy région
-      const dept = r.code_insee.substring(0, 2);
-      const arr = byRegion.get(dept) ?? [];
-      arr.push(r.mm);
-      byRegion.set(dept, arr);
-    }
+function computeDeptMedians(scores: ComputedScore[]): Map<string, number> {
+  const byDept = new Map<string, number[]>();
+  for (const s of scores) {
+    const dept = s.code_insee.substring(0, 2);
+    const arr  = byDept.get(dept) ?? [];
+    arr.push(s.mm);
+    byDept.set(dept, arr);
   }
-
   const medians = new Map<string, number>();
-  for (const [dept, mms] of byRegion) {
+  for (const [dept, mms] of byDept) {
     mms.sort((a, b) => a - b);
     medians.set(dept, mms[Math.floor(mms.length / 2)]);
   }
   return medians;
 }
 
-// ─── Calcul principal ────────────────────────────────────────────────────────
+// ─── Calcul commune par commune ───────────────────────────────────────────────
 
 function computeScore(
-  commune: CommuneData,
-  ceremaByAav: Map<string, CeremaData>,
-  deptMedians: Map<string, number>,
-  nationalMedian: number,
+  commune:         CommuneData,
+  ceremaByCommune: Map<string, CeremaComData>,
+  deptMedians:     Map<string, number>,
+  nationalMedian:  number,
 ): ComputedScore {
-  const { code_insee, prix_tx_median3y, median_uc, aav_code } = commune;
+  const { code_insee, prix_tx_median3y, median_uc } = commune;
 
-  // ─ Passe 1 : données propres
-  if (prix_tx_median3y != null && median_uc != null && median_uc > 0) {
-    const mm = Math.round((prix_tx_median3y / (median_uc * 1.5)) * 100) / 100;
-    return { code_insee, mm, score: mmToScore(mm), imputed: false, method: 'own_data' };
-  }
-
-  // ─ Passe 2 : Cerema AAV
-  if (aav_code) {
-    const cerema = ceremaByAav.get(aav_code);
-    if (cerema) {
-      return {
-        code_insee, mm: cerema.mm_aav, score: mmToScore(cerema.mm_aav),
-        imputed: true, method: 'cerema_aav', aav_code_used: aav_code,
-      };
+  // Niveau 1 — Cerema DV3F direct (meilleure donnée, imputed=false)
+  const cerema = ceremaByCommune.get(code_insee);
+  if (cerema) {
+    const candidates = [cerema.d5_appart, cerema.d5_maison].filter(
+      (v): v is number => v != null && v > 0,
+    );
+    if (candidates.length > 0) {
+      const mm = Math.round(Math.min(...candidates) * 100) / 100;
+      return { code_insee, mm, score: mmToScore(mm), imputed: false, method: 'cerema_aav_d5_2022_2024' };
     }
   }
 
-  // ─ Passe 3 : médiane départementale
-  const dept = code_insee.substring(0, 2);
+  // Niveau 2 — DVF + Filosofi 2021 (imputed=true)
+  if (prix_tx_median3y != null && median_uc != null && median_uc > 0) {
+    const mm = Math.round((prix_tx_median3y / median_uc) * 100) / 100;
+    return { code_insee, mm, score: mmToScore(mm), imputed: true, method: 'dvf_filosofi' };
+  }
+
+  // Niveau 3 — médiane départementale
+  const dept    = code_insee.substring(0, 2);
   const deptMed = deptMedians.get(dept);
   if (deptMed != null) {
     return { code_insee, mm: deptMed, score: mmToScore(deptMed), imputed: true, method: 'regional_median' };
   }
 
-  // ─ Passe 3 : médiane nationale (fallback ultime)
+  // Niveau 4 — médiane nationale (fallback ultime)
   return { code_insee, mm: nationalMedian, score: mmToScore(nationalMedian), imputed: true, method: 'national_median' };
 }
 
@@ -257,10 +266,7 @@ async function upsertScores(scores: ComputedScore[]): Promise<{ updated: number;
           ${batch.map(r => r.score)}::float8[],
           ${batch.map(r => r.mm)}::float8[],
           ${batch.map(r => r.imputed)}::boolean[],
-          ${batch.map(r => JSON.stringify({
-            method: r.method,
-            ...(r.aav_code_used ? { aav_code: r.aav_code_used } : {}),
-          }))}::text[]
+          ${batch.map(r => JSON.stringify({ method: r.method }))}::text[]
         ) AS t(commune_id, score, mm, imputed, methods)
         ON CONFLICT (commune_id) DO UPDATE
           SET score_accessibilite_fin = EXCLUDED.score_accessibilite_fin,
@@ -295,21 +301,22 @@ function validateWitnesses(scores: Map<string, ComputedScore>): void {
       continue;
     }
 
-    const inRange = result.score >= expected.expected_score_min && result.score <= expected.expected_score_max;
-    const icon = inRange ? '✓' : '✗';
+    const inRange = result.score >= expected.expected_score_min
+                 && result.score <= expected.expected_score_max;
+    const icon  = inRange ? '✓' : '✗';
     const range = `[${expected.expected_score_min}–${expected.expected_score_max}]`;
 
     console.log(
       `  ${icon} ${expected.name.padEnd(16)} | MM=${String(result.mm.toFixed(2)).padStart(5)} ` +
       `| score=${String(result.score.toFixed(1)).padStart(5)} ${range} ` +
-      `| ${result.imputed ? `IMPUTED(${result.method})` : 'propre'}`,
+      `| ${result.method}`,
     );
 
     if (inRange) ok++; else fail++;
   }
 
   const total = Object.keys(WITNESS_COMMUNES).length;
-  console.log(`\n  Résultat witnesses : ${ok}/${total} OK (seuil 8/${total})`);
+  console.log(`\n  Résultat witnesses : ${ok}/${total} OK, ${fail} hors tolérance (seuil 8/${total})`);
   if (ok < 8) {
     console.warn(`  ⚠  Moins de 8/${total} witnesses dans la tolérance — vérifier l'algorithme.`);
   }
@@ -325,12 +332,11 @@ async function main(): Promise<void> {
   if (DRY_RUN)        console.log('MODE DRY-RUN (pas d\'écriture en base)');
   if (FILTER_DEPTS)   console.log(`Filtrage départements : ${FILTER_DEPTS.join(', ')}`);
 
-  // 1. Charger toutes les données en mémoire
-  const { communes, ceremaByAav } = await loadAllData();
+  // 1. Chargement
+  const { communes, ceremaByCommune } = await loadAllData();
 
   // 2. Sélection des communes à traiter
   let communeList = [...communes.values()];
-
   if (TEST_MODE) {
     communeList = communeList.slice(0, 10);
   } else if (WITNESSES_MODE) {
@@ -341,55 +347,60 @@ async function main(): Promise<void> {
       FILTER_DEPTS.some(d => c.code_insee.startsWith(d)),
     );
   }
-
   console.log(`\n[compute-accessibilite] ${communeList.length} communes à traiter`);
 
-  // 3. Passe 1 — calcul propre (pour dériver les médianes régionales)
-  const passe1: ComputedScore[] = [];
+  // 3. Passe initiale niveaux 1+2 pour dériver les médianes départementales
+  const passeInit: ComputedScore[] = [];
   for (const c of communeList) {
+    const cerema = ceremaByCommune.get(c.code_insee);
+    if (cerema) {
+      const candidates = [cerema.d5_appart, cerema.d5_maison].filter(
+        (v): v is number => v != null && v > 0,
+      );
+      if (candidates.length > 0) {
+        const mm = Math.round(Math.min(...candidates) * 100) / 100;
+        passeInit.push({ code_insee: c.code_insee, mm, score: mmToScore(mm), imputed: false, method: 'cerema_aav_d5_2022_2024' });
+        continue;
+      }
+    }
     if (c.prix_tx_median3y != null && c.median_uc != null && c.median_uc > 0) {
-      const mm = Math.round((c.prix_tx_median3y / (c.median_uc * 1.5)) * 100) / 100;
-      passe1.push({ code_insee: c.code_insee, mm, score: mmToScore(mm), imputed: false, method: 'own_data' });
+      const mm = Math.round((c.prix_tx_median3y / c.median_uc) * 100) / 100;
+      passeInit.push({ code_insee: c.code_insee, mm, score: mmToScore(mm), imputed: true, method: 'dvf_filosofi' });
     }
   }
-  console.log(`[compute-accessibilite] Passe 1 : ${passe1.length} communes avec données propres`);
+  console.log(`[compute-accessibilite] Passe init (niveaux 1+2) : ${passeInit.length} communes`);
 
-  // Médianes par département (proxy région)
-  const deptMedians = computeRegionalMedians(passe1);
-  const allMms = passe1.map(r => r.mm).sort((a, b) => a - b);
-  const nationalMedian = allMms.length > 0 ? allMms[Math.floor(allMms.length / 2)] : 5.0;
+  const deptMedians   = computeDeptMedians(passeInit);
+  const allMms        = passeInit.map(r => r.mm).sort((a, b) => a - b);
+  const nationalMedian = allMms.length > 0 ? allMms[Math.floor(allMms.length / 2)] : 6.0;
   console.log(`[compute-accessibilite] Médiane nationale MM : ${nationalMedian.toFixed(2)}`);
 
-  // 4. Calcul complet (toutes passes)
+  // 4. Calcul complet (4 niveaux)
   const allScores = new Map<string, ComputedScore>();
-  let withOwnData = 0, withCerema = 0, withDept = 0, withNational = 0;
+  let n1 = 0, n2 = 0, n3 = 0, n4 = 0;
 
   for (const commune of communeList) {
-    const result = computeScore(commune, ceremaByAav, deptMedians, nationalMedian);
+    const result = computeScore(commune, ceremaByCommune, deptMedians, nationalMedian);
     allScores.set(commune.code_insee, result);
-
-    switch (result.method) {
-      case 'own_data':         withOwnData++;   break;
-      case 'cerema_aav':       withCerema++;    break;
-      case 'regional_median':  withDept++;      break;
-      case 'national_median':  withNational++;  break;
-    }
+    if      (result.method === 'cerema_aav_d5_2022_2024') n1++;
+    else if (result.method === 'dvf_filosofi')            n2++;
+    else if (result.method === 'regional_median')         n3++;
+    else                                                  n4++;
   }
 
   console.log(
     `[compute-accessibilite] Répartition méthodes :\n` +
-    `  own_data       : ${withOwnData}\n` +
-    `  cerema_aav     : ${withCerema}\n` +
-    `  regional_median: ${withDept}\n` +
-    `  national_median: ${withNational}`,
+    `  Niveau 1 cerema_aav_d5_2022_2024 : ${n1}\n` +
+    `  Niveau 2 dvf_filosofi            : ${n2}\n` +
+    `  Niveau 3 regional_median         : ${n3}\n` +
+    `  Niveau 4 national_median         : ${n4}`,
   );
 
-  // 5. Validation witnesses si mode dédié ou toutes communes
+  // 5. Validation witnesses si mode dédié ou batch complet
   if (WITNESSES_MODE || (!TEST_MODE && !FILTER_DEPTS)) {
     validateWitnesses(allScores);
   }
 
-  // Mode dry-run : afficher quelques exemples et sortir
   if (DRY_RUN) {
     console.log('\n[compute-accessibilite] DRY-RUN — aucune écriture en base.');
     const sample = [...allScores.values()].slice(0, 5);
@@ -404,7 +415,7 @@ async function main(): Promise<void> {
   console.log(`\n[compute-accessibilite] Upsert de ${scoreList.length} scores...`);
   const { updated, errors } = await upsertScores(scoreList);
 
-  // 7. Validation distribution (hors modes test/witnesses/dept)
+  // 7. Distribution (batch complet)
   if (!TEST_MODE && !WITNESSES_MODE && !FILTER_DEPTS) {
     const dist = await prisma.$queryRaw<Array<{ bucket: string; cnt: string }>>`
       SELECT width_bucket(score_accessibilite_fin, 0, 100, 10)::text AS bucket,
@@ -415,20 +426,21 @@ async function main(): Promise<void> {
       ORDER BY 1
     `;
     console.log('\n[compute-accessibilite] Distribution (buckets 0-100) :');
+    const maxCnt = Math.max(...dist.map(r => parseInt(r.cnt)), 1);
     for (const row of dist) {
       const lo  = (parseInt(row.bucket) - 1) * 10;
       const hi  = parseInt(row.bucket) * 10;
-      const bar = '█'.repeat(Math.round(parseInt(row.cnt) / (parseInt(dist[0]?.cnt ?? '1') || 1) * 20));
+      const bar = '█'.repeat(Math.round(parseInt(row.cnt) / maxCnt * 20));
       console.log(`  [${String(lo).padStart(3)}-${String(hi).padStart(3)}] ${row.cnt.padStart(6)} ${bar}`);
     }
   }
 
-  const duration_s = ((Date.now() - t0) / 1000).toFixed(1);
+  const duration = ((Date.now() - t0) / 1000).toFixed(1);
   console.log('\n=== Résultat ===');
-  console.log(`  Scores calculés  : ${allScores.size}`);
-  console.log(`  Scores upsertés  : ${updated}`);
-  console.log(`  Erreurs          : ${errors.length}`);
-  console.log(`  Durée            : ${duration_s}s`);
+  console.log(`  Scores calculés : ${allScores.size}`);
+  console.log(`  Scores upsertés : ${updated}`);
+  console.log(`  Erreurs         : ${errors.length}`);
+  console.log(`  Durée           : ${duration}s`);
 
   if (errors.length > 0) {
     console.error('\n  Détail erreurs (3 premiers) :');

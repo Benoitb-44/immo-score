@@ -38,3 +38,6 @@ prisma/migrations/
 
 # MCP config (contains credentials — use .mcp.json.example as template)
 .mcp.json
+
+# Cerema XLSX raw data (téléchargement manuel, hors repo)
+data/cerema/

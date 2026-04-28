@@ -307,20 +307,28 @@ model FilosofiCommune {
 }
 
 // ─────────────────────────────────────────────
-// Table 11 : cerema_accessibilite
-// Accessibilité financière au niveau AAV (Cerema DV3F)
-// Fallback quand DVF+Filosofi commune indisponibles
+// Table 11 : cerema_accessibilite — Sprint 4-A patch
+// Accessibilité financière par commune (Cerema DV3F 2022-2024).
+// Source niveau 1 : données directes par commune (d5 = médiane = décile 5).
+// commune_id = code INSEE 5 car. (clé unique, FK implicite).
 // ─────────────────────────────────────────────
 
 model CeremaAccessibilite {
-  id             String   @id @default(cuid())
-  aav_code       String   @unique  // Code AAV 2020 INSEE
-  lib_aav        String?           // Libellé de l'AAV
-  mm_aav         Float             // Median Multiple moyen de l'AAV
-  prix_m2_median Float?            // Prix m² médian transactions de l'AAV
-  annee          Int      @default(2022)
+  id         String   @id @default(cuid())
+  commune_id String   @unique  // Code INSEE commune 5 car.
+  aav_code   String?           // Code AAV 2020 INSEE (null = hors AAV)
 
-  updated_at     DateTime @updatedAt
+  // Déciles en années de revenu UC (d3=D3, d5=médiane, d7=D7)
+  d3_appart  Float?
+  d5_appart  Float?
+  d7_appart  Float?
+  d3_maison  Float?
+  d5_maison  Float?
+  d7_maison  Float?
+
+  annee      Int      @default(2024)
+  source     String   @default("cerema-2022-2024")
+  updated_at DateTime @updatedAt
 
   @@index([aav_code])
   @@map("cerema_accessibilite")
