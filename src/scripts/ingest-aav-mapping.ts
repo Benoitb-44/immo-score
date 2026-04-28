@@ -167,7 +167,8 @@ async function parseXlsx(buf: Buffer, requiredColumn?: string): Promise<SheetRow
 
     if (requiredColumn) {
       if (!Object.keys(rows[0]).includes(requiredColumn)) {
-        console.log(`  → Feuille "${name}" ignorée (colonne ${requiredColumn} absente)`);
+        const sample = Object.keys(rows[0]).slice(0, 6).join(', ');
+        console.log(`  → Feuille "${name}" ignorée (colonnes: ${sample}…)`);
         continue;
       }
     }
@@ -243,14 +244,19 @@ function parseSheetXml(xml: string, sharedStrings: string[]): SheetRow[] {
   while ((rowMatch = rowPattern.exec(xml)) !== null) {
     const rowXml = rowMatch[1];
     const cells: Array<{ col: number; value: string | number | null }> = [];
-    const cellPattern = /<c\s[^>]*r="([A-Z]+)(\d+)"[^>]*(?:\s+t="([^"]*)")?[^>]*>([\s\S]*?)<\/c>/g;
+    // Extraire les attributs du tag <c> en une seule capture, puis les parser
+    // indépendamment — évite le piège du [^>]* greedy qui consomme t="s"
+    const cellPattern = /<c\b([^>]*)>([\s\S]*?)<\/c>/g;
     let cMatch: RegExpExecArray | null;
     while ((cMatch = cellPattern.exec(rowXml)) !== null) {
-      const colLetters = cMatch[1];
-      const cellType   = cMatch[3] ?? '';
-      const cellInner  = cMatch[4];
+      const attrs    = cMatch[1];
+      const inner    = cMatch[2];
+      const rAttr    = attrs.match(/\br="([A-Z]+\d+)"/)?.[1];
+      if (!rAttr) continue;
+      const colLetters = rAttr.replace(/\d+$/, '');
+      const cellType   = attrs.match(/\bt="([^"]*)"/)?.[1] ?? '';
       const colNum     = colLettersToNum(colLetters);
-      const vMatch     = cellInner.match(/<v>([^<]*)<\/v>/);
+      const vMatch     = inner.match(/<v>([^<]*)<\/v>/);
       const rawVal     = vMatch?.[1] ?? null;
       let value: string | number | null = null;
       if (rawVal !== null) {
