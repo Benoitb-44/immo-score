@@ -21,8 +21,13 @@
  *     method = 'national_median'
  *
  * Paliers interpolation linéaire (unité : années de revenu UC) :
- *   [(0, 100), (4.5, 90), (6.0, 75), (7.5, 55), (13.5, 30), (∞, 10)]
- *   Floor 10 strict.
+ *   [(0, 95), (3.44, 90), (4.64, 75), (6.46, 55), (8.34, 30), (10.57, 10)]
+ *   Cap supérieur = 95 (pas 100 — réservé aux MM < 3.44).
+ *   Floor = 10 strict pour MM ≥ 10.57.
+ *
+ *   Paliers calibrés data-driven sur audit distribution Cerema 2022-2024 (2026-04-29) :
+ *     P10=3.44 → score 90 | P25=4.64 → 75 | P50=6.46 → 55 | P75=8.34 → 30 | P90=10.57 → 10
+ *   Source : 3305 communes, min=1.32, max=31.29, mean=6.77, σ=2.96.
  *
  * Flags CLI :
  *   --test            10 premières communes (dev)
@@ -42,7 +47,8 @@ const DRY_RUN        = process.argv.includes('--dry-run');
 const DEPTS_ARG      = process.argv.find(a => a.startsWith('--depts='));
 const FILTER_DEPTS   = DEPTS_ARG ? DEPTS_ARG.replace('--depts=', '').split(',').map(d => d.trim()) : null;
 
-// ─── Communes témoins (PATCH 5 — fenêtre 2022-2024, unité années UC) ─────────
+// ─── Communes témoins (v4-A data-driven — paliers calibrés 2026-04-29) ────────
+// MM réels issus de l'audit Cerema 2022-2024 ; tolérances ±5 pts ; seuil go 8/10.
 
 const WITNESS_COMMUNES: Record<string, {
   name: string;
@@ -50,16 +56,16 @@ const WITNESS_COMMUNES: Record<string, {
   expected_score_min: number;
   expected_score_max: number;
 }> = {
-  '19272': { name: 'Tulle',       expected_mm: 5.0,  expected_score_min: 83, expected_score_max: 93 },
-  '72181': { name: 'Le Mans',     expected_mm: 6.5,  expected_score_min: 62, expected_score_max: 72 },
-  '35238': { name: 'Rennes',      expected_mm: 9.0,  expected_score_min: 44, expected_score_max: 54 },
-  '24322': { name: 'Sarlat',      expected_mm: 8.5,  expected_score_min: 45, expected_score_max: 55 },
-  '33063': { name: 'Bordeaux',    expected_mm: 13.5, expected_score_min: 25, expected_score_max: 35 },
-  '69123': { name: 'Lyon',        expected_mm: 13.0, expected_score_min: 27, expected_score_max: 37 },
-  '75056': { name: 'Paris',       expected_mm: 18.0, expected_score_min: 10, expected_score_max: 15 },
-  '08392': { name: 'Saint-Juvin', expected_mm: 5.0,  expected_score_min: 30, expected_score_max: 80 }, // hors AAV → médiane régionale
-  '03310': { name: 'Vichy',       expected_mm: 6.7,  expected_score_min: 60, expected_score_max: 70 },
-  '83069': { name: 'Hyères',      expected_mm: 13.5, expected_score_min: 25, expected_score_max: 35 },
+  '19272': { name: 'Tulle',       expected_mm:  2.57, expected_score_min: 90, expected_score_max: 95 },
+  '08392': { name: 'Saint-Juvin', expected_mm:  4.36, expected_score_min: 73, expected_score_max: 83 },
+  '03310': { name: 'Vichy',       expected_mm:  4.00, expected_score_min: 75, expected_score_max: 85 },
+  '24322': { name: 'Sarlat',      expected_mm:  4.13, expected_score_min: 74, expected_score_max: 84 },
+  '72181': { name: 'Le Mans',     expected_mm:  4.29, expected_score_min: 73, expected_score_max: 83 },
+  '35238': { name: 'Rennes',      expected_mm:  8.02, expected_score_min: 27, expected_score_max: 37 },
+  '83069': { name: 'Hyères',      expected_mm:  8.73, expected_score_min: 20, expected_score_max: 30 },
+  '33063': { name: 'Bordeaux',    expected_mm:  9.35, expected_score_min: 15, expected_score_max: 25 },
+  '69123': { name: 'Lyon',        expected_mm: 10.42, expected_score_min:  8, expected_score_max: 15 },
+  '75056': { name: 'Paris',       expected_mm: 13.25, expected_score_min: 10, expected_score_max: 10 },
 };
 
 // ─── Scoring (paliers linéaires, unité : années revenu UC) ────────────────────
@@ -67,12 +73,14 @@ const WITNESS_COMMUNES: Record<string, {
 const FLOOR_SCORE = 10;
 
 // Breakpoints : [mm_seuil, score_au_seuil]
+// Calibrés sur percentiles réels Cerema 2022-2024 (audit 2026-04-29, n=3305 communes).
 const BREAKPOINTS: [number, number][] = [
-  [0,    100],
-  [4.5,   90],
-  [6.0,   75],
-  [7.5,   55],
-  [13.5,  30],
+  [0,      95],  // cap — aucune commune ne score 100
+  [3.44,   90],  // P10
+  [4.64,   75],  // P25
+  [6.46,   55],  // P50 médiane
+  [8.34,   30],  // P75
+  [10.57,  10],  // P90 → floor strict
 ];
 
 /**
@@ -81,7 +89,7 @@ const BREAKPOINTS: [number, number][] = [
  * Floor 10 strict pour éviter l'annihilation dans le score géométrique global.
  */
 function mmToScore(mm: number): number {
-  if (mm <= BREAKPOINTS[0][0]) return 100;
+  if (mm <= BREAKPOINTS[0][0]) return BREAKPOINTS[0][1]; // 95 cap
 
   for (let i = 0; i < BREAKPOINTS.length - 1; i++) {
     const [x0, y0] = BREAKPOINTS[i];
