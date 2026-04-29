@@ -87,16 +87,47 @@ async function parseXlsx(buf: Buffer): Promise<SheetRow[]> {
     throw new Error('Le fichier ne semble pas être un XLSX valide (magic bytes ZIP attendus).');
   }
   const files = await extractZipFiles(buf);
+
   const sharedStrings = parseSharedStrings(files['xl/sharedStrings.xml'] ?? '');
   const workbookXml   = files['xl/workbook.xml'] ?? '';
-  const sheetMatch    = workbookXml.match(/<sheet[^>]+r:id="(rId\d+)"[^>]*\/>/);
-  const rId           = sheetMatch?.[1] ?? 'rId1';
   const relsXml       = files['xl/_rels/workbook.xml.rels'] ?? '';
-  const relMatch      = new RegExp(`Id="${rId}"[^>]+Target="([^"]+)"`).exec(relsXml);
-  const sheetPath     = 'xl/' + (relMatch?.[1]?.replace(/^\/xl\//, '') ?? 'worksheets/sheet1.xml');
-  const sheetXml      = files[sheetPath] ?? files['xl/worksheets/sheet1.xml'] ?? '';
-  if (!sheetXml) throw new Error(`Feuille introuvable dans le XLSX (cherché : ${sheetPath})`);
-  return parseSheetXml(sheetXml, sharedStrings);
+
+  // Construire la map rId → chemin de feuille
+  const relsMap: Record<string, string> = {};
+  const relsPattern = /Id="(rId\d+)"[^>]+Target="([^"]+)"/g;
+  let relM: RegExpExecArray | null;
+  while ((relM = relsPattern.exec(relsXml)) !== null) relsMap[relM[1]] = relM[2];
+
+  // Lister toutes les feuilles dans l'ordre du workbook
+  const sheets: Array<{ rId: string; name: string }> = [];
+  const sheetPattern = /<sheet\s[^>]*name="([^"]*)"[^>]*r:id="(rId\d+)"/g;
+  let sM: RegExpExecArray | null;
+  while ((sM = sheetPattern.exec(workbookXml)) !== null) sheets.push({ name: sM[1], rId: sM[2] });
+  if (sheets.length === 0) sheets.push({ rId: 'rId1', name: 'sheet1' });
+
+  console.log(`  → Feuilles XLSX : ${sheets.map(s => `"${s.name}"`).join(', ')}`);
+
+  for (const { rId, name } of sheets) {
+    const target   = relsMap[rId] ?? '';
+    const path     = 'xl/' + target.replace(/^\/xl\//, '');
+    const sheetXml = files[path] ?? files['xl/worksheets/sheet1.xml'] ?? '';
+    if (!sheetXml) continue;
+
+    // INSEE_COM en majuscule pour la détection (headers stockés en minuscule)
+    const rows = parseSheetXml(sheetXml, sharedStrings, ['INSEE_COM', 'INSEE_C']);
+    if (rows.length === 0) continue;
+
+    if (!Object.keys(rows[0]).includes('insee_com')) {
+      const sample = Object.keys(rows[0]).slice(0, 5).join(', ');
+      console.log(`  → Feuille "${name}" ignorée (colonnes: ${sample}…)`);
+      continue;
+    }
+
+    console.log(`  → Feuille sélectionnée : "${name}" (${rows.length} lignes)`);
+    return rows;
+  }
+
+  throw new Error('Aucune feuille ne contient la colonne "insee_com" dans le XLSX');
 }
 
 async function extractZipFiles(buf: Buffer): Promise<Record<string, string>> {
@@ -152,41 +183,54 @@ function parseSharedStrings(xml: string): string[] {
   return strings;
 }
 
-function parseSheetXml(xml: string, sharedStrings: string[]): SheetRow[] {
+// headerHints : liste de noms de colonnes attendus (en MAJUSCULE) — ignore les
+// lignes de titre INSEE jusqu'à trouver la vraie ligne d'en-têtes.
+function parseSheetXml(xml: string, sharedStrings: string[], headerHints?: string[]): SheetRow[] {
   const rows: SheetRow[] = [];
   let headers: string[] = [];
   const rowPattern = /<row[^>]*>([\s\S]*?)<\/row>/g;
   let rowMatch: RegExpExecArray | null;
+
   while ((rowMatch = rowPattern.exec(xml)) !== null) {
     const rowXml = rowMatch[1];
     const cells: Array<{ col: number; value: string | number | null }> = [];
-    const cellPattern = /<c\s[^>]*r="([A-Z]+)(\d+)"[^>]*(?:\s+t="([^"]*)")?[^>]*>([\s\S]*?)<\/c>/g;
+    // Capture tous les attributs du tag <c> d'un coup — évite le [^>]* greedy
+    // qui consomme t="s" avant que le groupe optionnel puisse le capturer.
+    const cellPattern = /<c\b([^>]*)>([\s\S]*?)<\/c>/g;
     let cMatch: RegExpExecArray | null;
     while ((cMatch = cellPattern.exec(rowXml)) !== null) {
-      const colLetters = cMatch[1];
-      const cellType   = cMatch[3] ?? '';
-      const cellInner  = cMatch[4];
+      const attrs      = cMatch[1];
+      const inner      = cMatch[2];
+      const rAttr      = attrs.match(/\br="([A-Z]+\d+)"/)?.[1];
+      if (!rAttr) continue;
+      const colLetters = rAttr.replace(/\d+$/, '');
+      const cellType   = attrs.match(/\bt="([^"]*)"/)?.[1] ?? '';
       const colNum     = colLettersToNum(colLetters);
-      const vMatch     = cellInner.match(/<v>([^<]*)<\/v>/);
+      const vMatch     = inner.match(/<v>([^<]*)<\/v>/);
       const rawVal     = vMatch?.[1] ?? null;
       let value: string | number | null = null;
       if (rawVal !== null) {
-        if (cellType === 's')   value = sharedStrings[parseInt(rawVal)] ?? '';
+        if (cellType === 's')        value = sharedStrings[parseInt(rawVal)] ?? '';
         else if (cellType === 'str') value = rawVal;
         else { const n = parseFloat(rawVal); value = isNaN(n) ? rawVal : n; }
       }
       cells.push({ col: colNum, value });
     }
     if (cells.length === 0) continue;
+
     if (headers.length === 0) {
+      const cellValuesUpper = cells.map(c => String(c.value ?? '').trim().toUpperCase());
+      if (headerHints && !headerHints.some(h => cellValuesUpper.includes(h))) continue;
       const maxCol = Math.max(...cells.map(c => c.col));
       headers = new Array(maxCol + 1).fill('');
+      // Cerema : headers en minuscule (transformRows attend 'insee_com', 'd3_appartement'…)
       for (const c of cells) headers[c.col] = String(c.value ?? '').trim().toLowerCase();
-    } else {
-      const row: SheetRow = {};
-      for (const c of cells) { if (headers[c.col]) row[headers[c.col]] = c.value; }
-      if (Object.keys(row).length > 0) rows.push(row);
+      continue;
     }
+
+    const row: SheetRow = {};
+    for (const c of cells) { if (headers[c.col]) row[headers[c.col]] = c.value; }
+    if (Object.keys(row).length > 0) rows.push(row);
   }
   return rows;
 }
