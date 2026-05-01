@@ -21,6 +21,8 @@
     "ingest:filosofi": "tsx src/scripts/ingest-filosofi.ts",
     "ingest:cerema": "tsx src/scripts/ingest-cerema-accessibilite.ts",
     "ingest:aav": "tsx src/scripts/ingest-aav-mapping.ts",
+    "ingest:tf": "tsx src/scripts/ingest-tf.ts",
+    "ingest:loyers": "tsx src/scripts/ingest-loyers.ts",
     "aggregate:dvf-prix-tx": "tsx src/scripts/aggregate-dvf-prix-tx.ts",
     "compute:scores": "tsx src/scripts/compute-scores.ts",
     "compute:accessibilite": "tsx src/scripts/compute-accessibilite.ts",
