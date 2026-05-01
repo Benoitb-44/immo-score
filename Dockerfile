@@ -29,6 +29,8 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/src/scripts ./src/scripts
 COPY --from=builder /app/src/lib ./src/lib
 COPY --from=builder /app/prisma ./prisma
+# Scripts utilitaires (probes, diagnostics)
+COPY --from=builder /app/scripts ./scripts
 
 EXPOSE 3000
 CMD ["node", "server.js"]

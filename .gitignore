@@ -39,5 +39,10 @@ prisma/migrations/
 # MCP config (contains credentials — use .mcp.json.example as template)
 .mcp.json
 
-# Cerema XLSX raw data (téléchargement manuel, hors repo)
+# Raw data téléchargée (hors repo — trop lourde, répertoire reconstruit par probe/ingest)
 data/cerema/
+data/cartes-loyers/
+data/dgfip-rei/
+
+# Couverture de tests
+coverage/

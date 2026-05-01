@@ -27,7 +27,9 @@
     "test:scoring": "tsx src/scripts/test-scoring.ts",
     "test:scoring-v2": "tsx src/scripts/test-scoring-v2.ts",
     "test:accessibilite": "tsx src/scripts/test-accessibilite.ts",
-    "test:calc": "vitest run --coverage src/lib/__tests__/financial-calc.test.ts"
+    "test:calc": "vitest run --coverage src/lib/__tests__/financial-calc.test.ts",
+    "probe:loyers": "tsx scripts/probe-xlsx.ts --url=https://www.data.gouv.fr/api/1/datasets/r/34434cef-2f85-43b9-a601-c625ee426cb7 --name=\"Carte Loyers 2023 (ANIL/Cerema)\" --output=docs/probes/probe-cartes-loyers-2023.md --download-dir=data/cartes-loyers/current",
+    "probe:rei": "tsx scripts/probe-xlsx.ts --url=https://static.data.gouv.fr/resources/impots-locaux/20210930-121834/fiscalite-directe-locale-deliberations-taux-2020.zip --name=\"DGFiP REI fiscalité locale (2020)\" --output=docs/probes/probe-dgfip-rei-2024.md --download-dir=data/dgfip-rei/current"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -48,6 +50,7 @@
     "prisma": "^5.22.0",
     "tailwindcss": "^3.4.15",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.9"
+    "vitest": "^2.1.9",
+    "xlsx": "^0.18.5"
   }
 }
