@@ -28,7 +28,7 @@ jobs:
             docker compose up -d
             docker image prune -f
             echo "⏳ Healthcheck post-deploy..."
-            sleep 15
+            sleep 45
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001)
             if [ "$HTTP_CODE" != "200" ]; then
               echo "❌ Healthcheck failed (HTTP $HTTP_CODE)"
