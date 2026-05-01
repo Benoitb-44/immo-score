@@ -26,7 +26,8 @@
     "compute:accessibilite": "tsx src/scripts/compute-accessibilite.ts",
     "test:scoring": "tsx src/scripts/test-scoring.ts",
     "test:scoring-v2": "tsx src/scripts/test-scoring-v2.ts",
-    "test:accessibilite": "tsx src/scripts/test-accessibilite.ts"
+    "test:accessibilite": "tsx src/scripts/test-accessibilite.ts",
+    "test:calc": "vitest run --coverage src/lib/__tests__/financial-calc.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -39,12 +40,14 @@
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@vitest/coverage-v8": "^2.1.9",
     "autoprefixer": "^10.4.20",
     "eslint": "^8.57.1",
     "eslint-config-next": "14.2.29",
     "postcss": "^8.4.49",
     "prisma": "^5.22.0",
     "tailwindcss": "^3.4.15",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.9"
   }
 }
