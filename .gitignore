@@ -39,6 +39,9 @@ prisma/migrations/
 # MCP config (contains credentials — use .mcp.json.example as template)
 .mcp.json
 
+# Claude Code local config (machine-specific, not shared)
+.claude/settings.local.json
+
 # Raw data téléchargée (hors repo — trop lourde, répertoire reconstruit par probe/ingest)
 data/cerema/
 data/cartes-loyers/
