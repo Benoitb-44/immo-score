@@ -442,7 +442,7 @@ model FiscaliteCommune {
 // Table 15 : loyer_communes (v4-LOY)
 // Loyers médians par commune — Carte Loyers ANIL/Cerema 2023
 // Source : pred-mai-mef-dhup.csv (data.gouv.fr)
-// v4-LOY-3M (R2) : 5 colonnes source tracking ajoutées (DATA-v4-LOY-3M Phase 2 Step 1)
+// v4-LOY-3M (R2) : 6 colonnes source tracking ajoutées (DATA-v4-LOY-3M Phase 2 Step 1)
 // ─────────────────────────────────────────────
 
 model LoyerCommune {
@@ -461,9 +461,9 @@ model LoyerCommune {
   niveau    String // 'N1' | 'N1bis' | 'N2' | 'N3' | 'N4'
   source    String // 'carte_loyers_anil' | 'oll_paris' | 'oll_lyon' | 'oll_amp' | 'dvf_inverse' | 'regional_median' | 'national_median'
   millesime Int // millésime de la source (ex: 2023)
-  nbObs     Int? // nb observations utilisées pour cette source (niveau commune ou maille)
-  q1M2      Decimal? @db.Decimal(6, 2) // 1er quartile loyer €/m²
-  q3M2      Decimal? @db.Decimal(6, 2) // 3e quartile loyer €/m²
+  nbObs     Int?     @map("nb_obs_src") // nb observations utilisées pour cette source (niveau commune ou maille)
+  q1M2      Decimal? @db.Decimal(6, 2) @map("q1_m2") // 1er quartile loyer €/m²
+  q3M2      Decimal? @db.Decimal(6, 2) @map("q3_m2") // 3e quartile loyer €/m²
 
   updated_at DateTime @updatedAt
 
