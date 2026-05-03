@@ -29,8 +29,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Prisma
-prisma/migrations/
+# Prisma — migrations trackées depuis v4-LOY-3M (passage de db push à prisma migrate)
 
 # IDE
 .vscode/
