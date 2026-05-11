@@ -2,7 +2,7 @@
  * ingest-loyers-oll-amp.ts
  * Ingestion OLL AMP/Marseille IRIS → 13055 (N1bis), agrégation 2 étapes.
  *
- * Source IRIS   : API data.ampmetropole.fr (format pivot wide 68 col, UTF-8 BOM)
+ * Source IRIS   : API data.ampmetropole.fr (format pivot wide ~68 col, UTF-8 BOM)
  *                 Pré-téléchargé par probe step 2 : /tmp/probe-loyers/amp-loyers.csv
  * Source zonage : L1300Zonage2024.csv — mapping IRIS → arrondissement 13201-13216
  *                 Attendu : /tmp/probe-loyers/L1300Zonage2024.csv
@@ -13,14 +13,14 @@
  *
  * Logs intermédiaires : /tmp/loyers-amp-arrondissements.json (non persistés en BDD)
  *
+ * IDEMPOTENCE : ON CONFLICT (commune_id) DO UPDATE — re-run sans danger.
+ *
  * Usage :
  *   npm run ingest:oll-amp
  *   npm run ingest:oll-amp -- --iris-csv=/tmp/amp.csv --zonage-csv=/tmp/L1300Zonage2024.csv
  */
 
 import { PrismaClient } from '@prisma/client';
-import { createInterface } from 'readline';
-import { Readable } from 'stream';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 
 const prisma = new PrismaClient();
@@ -35,6 +35,20 @@ const IRIS_CSV_ARG   = process.argv.find(a => a.startsWith('--iris-csv='));
 const ZONAGE_CSV_ARG = process.argv.find(a => a.startsWith('--zonage-csv='));
 const IRIS_CSV_PATH   = IRIS_CSV_ARG   ? IRIS_CSV_ARG.replace('--iris-csv=', '')     : '/tmp/probe-loyers/amp-loyers.csv';
 const ZONAGE_CSV_PATH = ZONAGE_CSV_ARG ? ZONAGE_CSV_ARG.replace('--zonage-csv=', '') : '/tmp/probe-loyers/L1300Zonage2024.csv';
+
+// ─── Colonnes IRIS loyers (data.ampmetropole.fr OLL AMP 2024) ──────────────────
+// Aucun fallback. Si une colonne est absente → findColStrict throw avec headers reçus.
+// TODO VPS : confirmer via `head -2 /tmp/probe-loyers/amp-loyers.csv | iconv -f utf8`
+const COL_IRIS_CODE = 'code_iris';
+const COL_LOYER     = 'loy_med_tout';    // loyer médian toutes époques/types
+const COL_NB_OBS    = 'nb_obs_tout';     // effectif toutes époques/types
+const COL_Q1        = 'q1_tout';         // 1er quartile toutes époques/types
+const COL_Q3        = 'q3_tout';         // 3e quartile toutes époques/types
+
+// ─── Colonnes Zonage L1300Zonage2024.csv (OLL standard AMP) ──────────────────────
+// TODO VPS : confirmer via `head -2 /tmp/probe-loyers/L1300Zonage2024.csv`
+const COL_ZONAGE_IRIS = 'code_iris';
+const COL_ZONAGE_ARR  = 'code_commune';
 
 // 16 arrondissements Marseille
 const ARR_CODES = [
@@ -92,18 +106,18 @@ function parseIntFr(raw: string): number | null {
   return isNaN(v) ? null : v;
 }
 
-function norm(s: string): string {
-  // Strip BOM then normalize
-  return s.replace(/﻿/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function findCol(headers: string[], ...variants: string[]): number {
-  const normed = headers.map(norm);
-  for (const v of variants) {
-    const idx = normed.indexOf(norm(v));
-    if (idx !== -1) return idx;
+function findColStrict(headers: string[], colName: string): number {
+  // Strip BOM + normalize to lowercase for comparison
+  const lower = headers.map(h => h.replace(/﻿/g, '').toLowerCase());
+  const idx = lower.indexOf(colName.toLowerCase());
+  if (idx === -1) {
+    throw new Error(
+      `Colonne "${colName}" absente du CSV.\n` +
+      `Headers reçus (${headers.length}) : ${headers.join('; ')}\n` +
+      `→ Mettre à jour la constante correspondante dans le script.`,
+    );
   }
-  return -1;
+  return idx;
 }
 
 function readLocalCsv(filePath: string): string {
@@ -123,37 +137,33 @@ function readLocalCsv(filePath: string): string {
   return raw.startsWith('﻿') ? raw.slice(1) : raw;
 }
 
-async function parseZonage(content: string): Promise<ZonageRow[]> {
+function parseZonage(content: string): ZonageRow[] {
   const sep = content.includes(';') ? ';' : ',';
-  const rl = createInterface({ input: Readable.from(content), crlfDelay: Infinity });
+  const lines = content.split('\n');
 
   const rows: ZonageRow[] = [];
   let lineCount = 0;
   let irisIdx = -1, arrIdx = -1;
 
-  for await (const line of rl) {
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\r$/, '');
     lineCount++;
     if (!line.trim()) continue;
 
     const cols = line.split(sep).map(c => c.trim().replace(/^"|"$/g, ''));
 
     if (lineCount === 1) {
-      irisIdx = findCol(cols, 'code_iris', 'iris', 'iris_code', 'codeiris', 'code_iris_2019', 'code_iris_2020');
-      arrIdx  = findCol(cols, 'code_arr', 'arr', 'code_commune', 'commune_code', 'code_com', 'com', 'code_arrondissement');
+      irisIdx = findColStrict(cols, COL_ZONAGE_IRIS);
+      arrIdx  = findColStrict(cols, COL_ZONAGE_ARR);
 
       console.log(`  Zonage indices : iris[${irisIdx}] arr[${arrIdx}]`);
       console.log(`  Colonnes (${cols.length}) : ${cols.slice(0, 8).join(' | ')}...`);
-
-      if (irisIdx === -1 || arrIdx === -1) {
-        throw new Error(`Colonnes iris/arr introuvables dans zonage.\nHeaders : ${cols.join(', ')}`);
-      }
       continue;
     }
 
     const irisCode = cols[irisIdx]?.trim();
     const arrCode  = cols[arrIdx]?.trim();
     if (!irisCode || !arrCode) continue;
-    // Garder uniquement les IRIS des arrondissements Marseille
     if (!ARR_CODES.includes(arrCode)) continue;
 
     rows.push({ irisCode, arrCode });
@@ -163,52 +173,49 @@ async function parseZonage(content: string): Promise<ZonageRow[]> {
   return rows;
 }
 
-async function parseIrisCsv(content: string): Promise<IrisData[]> {
+interface IrisColMap {
+  iris:  number;
+  loyer: number;
+  obs:   number;
+  q1:    number;
+  q3:    number;
+}
+
+function parseIrisCsv(content: string): IrisData[] {
   const sep = content.includes(';') ? ';' : ',';
-  const rl = createInterface({ input: Readable.from(content), crlfDelay: Infinity });
+  const lines = content.split('\n');
 
   const rows: IrisData[] = [];
   let lineCount = 0;
-  let irisIdx = -1, loyerIdx = -1, nbObsIdx = -1, q1Idx = -1, q3Idx = -1;
+  let colMap: IrisColMap | null = null;
 
-  for await (const line of rl) {
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\r$/, '');
     lineCount++;
     if (!line.trim()) continue;
 
     const cols = line.split(sep).map(c => c.trim().replace(/^"|"$/g, ''));
 
     if (lineCount === 1) {
-      irisIdx  = findCol(cols, 'code_iris', 'iris', 'iris_code', 'codeiris', 'code_iris_2019', 'code_iris_2020');
+      colMap = {
+        iris:  findColStrict(cols, COL_IRIS_CODE),
+        loyer: findColStrict(cols, COL_LOYER),
+        obs:   findColStrict(cols, COL_NB_OBS),
+        q1:    findColStrict(cols, COL_Q1),
+        q3:    findColStrict(cols, COL_Q3),
+      };
 
-      // Loyer "toutes époques" : variantes spécifiques en premier, puis fallback générique
-      loyerIdx = findCol(cols,
-        'loyer_med_tout',    'loy_tout_m2',       'loyer_ensemble',
-        'loyer_tout',        'loyer_median_tout',  'loyer_median_ensemble',
-        'loyer_med',         'loypredm2',          'loyer_m2',
-        'loyer_median',      'loyer',
-      );
-      nbObsIdx = findCol(cols,
-        'nb_obs_tout', 'n_obs_tout',     'effectif_tout',   'nb_obs_ensemble',
-        'nb_obs',      'n_obs',          'effectif',        'nbobs_com',
-        'nb_observations',
-      );
-      q1Idx = findCol(cols, 'q1_tout', 'q1_m2_tout', 'lwr.IPm2', 'q1_m2', 'q1', 'premier_quartile');
-      q3Idx = findCol(cols, 'q3_tout', 'q3_m2_tout', 'upr.IPm2', 'q3_m2', 'q3', 'troisieme_quartile');
-
-      console.log(`  IRIS indices : iris[${irisIdx}] loyer[${loyerIdx}] nbObs[${nbObsIdx}] q1[${q1Idx}] q3[${q3Idx}]`);
+      console.log(`  IRIS indices : iris[${colMap.iris}] loyer[${colMap.loyer}] nbObs[${colMap.obs}] q1[${colMap.q1}] q3[${colMap.q3}]`);
       console.log(`  Total colonnes : ${cols.length} | Ex : ${cols.slice(0, 6).join(' | ')}...`);
-
-      if (irisIdx === -1 || loyerIdx === -1) {
-        throw new Error(`Colonnes iris/loyer introuvables.\nHeaders (${cols.length}) : ${cols.join(', ')}`);
-      }
       continue;
     }
 
-    if (cols.length <= Math.max(irisIdx, loyerIdx)) continue;
+    if (!colMap) continue;
+    if (cols.length <= Math.max(colMap.iris, colMap.loyer, colMap.obs)) continue;
 
-    const irisCode = cols[irisIdx]?.trim();
-    const loyer    = parseFr(cols[loyerIdx]);
-    const nbObs    = nbObsIdx !== -1 ? parseIntFr(cols[nbObsIdx]) : null;
+    const irisCode = cols[colMap.iris]?.trim();
+    const loyer    = parseFr(cols[colMap.loyer]);
+    const nbObs    = parseIntFr(cols[colMap.obs]);
 
     if (!irisCode || loyer === null || nbObs === null || nbObs <= 0) continue;
 
@@ -216,8 +223,8 @@ async function parseIrisCsv(content: string): Promise<IrisData[]> {
       irisCode,
       loyerM2: loyer,
       nbObs,
-      q1M2: q1Idx !== -1 ? parseFr(cols[q1Idx]) : null,
-      q3M2: q3Idx !== -1 ? parseFr(cols[q3Idx]) : null,
+      q1M2: parseFr(cols[colMap.q1]),
+      q3M2: parseFr(cols[colMap.q3]),
     });
   }
 
@@ -283,16 +290,19 @@ function aggregateTo13055(arrResults: ArrResult[]): { loyerM2: number; q1M2: num
   };
 }
 
-async function upsert(agg: { loyerM2: number; q1M2: number | null; q3M2: number | null; nbObs: number }): Promise<void> {
+async function upsert(agg: { loyerM2: number; q1M2: number | null; q3M2: number | null; nbObs: number }): Promise<number> {
+  // IDEMPOTENCE : ON CONFLICT (commune_id) est la contrainte unique du schéma.
+  // Re-run après échec partiel = safe, aucun doublon possible.
+  // WHERE EXISTS garantit l'intégrité FK (communes.code_insee doit exister).
   const loyer = Math.round(agg.loyerM2 * 100) / 100;
   const q1    = agg.q1M2 !== null ? Math.round(agg.q1M2 * 100) / 100 : null;
   const q3    = agg.q3M2 !== null ? Math.round(agg.q3M2 * 100) / 100 : null;
   const nbObs = agg.nbObs;
 
-  await prisma.$executeRaw`
+  const result = await prisma.$executeRaw`
     INSERT INTO immo_score.loyer_communes
       (id, commune_id, loyer_m2, niveau, source, millesime, nb_obs_src, q1_m2, q3_m2, annee, updated_at)
-    VALUES (
+    SELECT
       gen_random_uuid()::text,
       ${COMMUNE_ID}::text,
       ${loyer}::float8,
@@ -304,7 +314,7 @@ async function upsert(agg: { loyerM2: number; q1M2: number | null; q3M2: number 
       ${q3}::numeric(6,2),
       ${MILLESIME}::int,
       NOW()
-    )
+    WHERE EXISTS (SELECT 1 FROM immo_score.communes WHERE code_insee = ${COMMUNE_ID})
     ON CONFLICT (commune_id) DO UPDATE SET
       loyer_m2         = EXCLUDED.loyer_m2,
       niveau           = EXCLUDED.niveau,
@@ -321,6 +331,7 @@ async function upsert(agg: { loyerM2: number; q1M2: number | null; q3M2: number 
       r2_adj           = NULL,
       updated_at       = NOW()
   `;
+  return result;
 }
 
 async function main(): Promise<void> {
@@ -331,7 +342,7 @@ async function main(): Promise<void> {
 
   console.log('\n[1/6] Lecture L1300Zonage2024.csv (IRIS → arrondissements)...');
   const zonageContent = readLocalCsv(ZONAGE_CSV_PATH);
-  const zonage = await parseZonage(zonageContent);
+  const zonage = parseZonage(zonageContent);
 
   if (zonage.length < 50) {
     console.error(`  ✗ Trop peu d'IRIS dans le zonage (${zonage.length} < 50). Vérifier le fichier.`);
@@ -340,7 +351,7 @@ async function main(): Promise<void> {
 
   console.log('\n[2/6] Lecture IRIS loyers CSV (UTF-8, pivot wide)...');
   const irisContent = readLocalCsv(IRIS_CSV_PATH);
-  const irisData = await parseIrisCsv(irisContent);
+  const irisData = parseIrisCsv(irisContent);
 
   if (irisData.length < 100) {
     console.error(`  ✗ Trop peu d'IRIS parsés (${irisData.length} < 100). Vérifier le fichier CSV.`);
@@ -351,7 +362,7 @@ async function main(): Promise<void> {
   const arrResults = aggregateToArrondissements(irisData, zonage);
   console.log(`  → ${arrResults.length}/16 arrondissements calculés`);
 
-  // Log intermédiaire (NON persisté en BDD — codes 13201-13216 absents de Commune)
+  // Log intermédiaire (NON persisté en BDD — codes 13201-13216 absents de communes)
   const logPayload = arrResults.map(r => ({
     arrCode:  r.arrCode,
     loyerM2:  Math.round(r.loyerM2 * 100) / 100,
@@ -378,8 +389,13 @@ async function main(): Promise<void> {
   }
   console.log(`  ✓ Witness OK : ${agg.loyerM2.toFixed(4)} ∈ [${WITNESS_MIN}; ${WITNESS_MAX}]`);
 
-  console.log('\n[6/6] Upsert LoyerCommune 13055...');
-  await upsert(agg);
+  console.log('\n[6/6] Upsert LoyerCommune 13055 (idempotent)...');
+  const affected = await upsert(agg);
+  if (affected === 0) {
+    console.error(`  ✗ 0 lignes affectées — commune ${COMMUNE_ID} absente de immo_score.communes.`);
+    process.exit(1);
+  }
+  console.log(`  ✓ ${affected} ligne upsertée`);
 
   console.log('\n=== Résultat ===');
   console.log(`  commune_id : ${COMMUNE_ID} | niveau : ${NIVEAU} | source : ${SOURCE} | millesime : ${MILLESIME}`);
