@@ -21,7 +21,7 @@ const jsonLd = {
     'Documentation complète de la méthode de calcul du score CityRank : 4 dimensions, sources open data, limitations.',
   author: { '@type': 'Organization', name: 'CityRank' },
   datePublished: '2026-04-19',
-  dateModified: '2026-04-19',
+  dateModified: '2026-05-11',
   url: 'https://cityrank.fr/methodologie',
 };
 
