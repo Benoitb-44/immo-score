@@ -27,7 +27,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { spawnSync } from 'child_process';
+import { extractFromZip } from './zip-extract';
 
 const prisma = new PrismaClient();
 
@@ -131,18 +131,7 @@ function buildColMap(headers: string[]): ColMap {
 }
 
 function extractZipCsv(zipPath: string): Buffer {
-  const res = spawnSync('unzip', ['-p', zipPath, 'Base_OP_2024_L7500.csv'], {
-    maxBuffer: 100 * 1024 * 1024,
-  });
-  if (res.error) throw new Error(`unzip error: ${res.error.message}`);
-  if (res.status !== 0) {
-    const stderr = res.stderr ? (res.stderr as Buffer).toString() : '(no stderr)';
-    throw new Error(`unzip exit=${res.status}: ${stderr}`);
-  }
-  if (!res.stdout || (res.stdout as Buffer).length === 0) {
-    throw new Error(`unzip: stdout vide — fichier Base_OP_2024_L7500.csv introuvable dans ${zipPath}`);
-  }
-  return res.stdout as Buffer;
+  return extractFromZip(zipPath, 'Base_OP_2024_L7500.csv');
 }
 
 function isAllEmpty(cols: string[], ...indices: number[]): boolean {
