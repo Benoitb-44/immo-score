@@ -31,7 +31,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { spawnSync } from 'child_process';
+import { extractFromZip } from './zip-extract';
 
 const prisma = new PrismaClient();
 
@@ -132,62 +132,7 @@ function buildColMap(headers: string[]): ColMap {
 }
 
 function extractZipCsv(zipPath: string): Buffer {
-  const res = spawnSync('unzip', ['-p', zipPath, 'Base_OP_2024_L1300.csv'], {
-    maxBuffer: 100 * 1024 * 1024,
-  });
-  if (res.error) throw new Error(`unzip error: ${res.error.message}`);
-  if (res.status !== 0) {
-    // unzip can't read the central directory of this ZIP (non-standard structure)
-    // — fallback to Python extraction
-    return extractZipCsvPython(zipPath);
-  }
-  if (!res.stdout || (res.stdout as Buffer).length === 0) {
-    return extractZipCsvPython(zipPath);
-  }
-  return res.stdout as Buffer;
-}
-
-function extractZipCsvPython(zipPath: string): Buffer {
-  // L1300 ZIP has a non-standard central directory; extract via Python struct+zlib
-  const script = `
-import struct, zlib, sys
-with open(sys.argv[1], 'rb') as f:
-    data = f.read()
-# Find EOCD to locate central directory
-eocd = data.rfind(b'PK\\x05\\x06')
-if eocd == -1: sys.exit(1)
-# Search for central directory entries starting from (file_size - 65KB)
-target = b'Base_OP_2024_L1300.csv'
-cd_sig = b'PK\\x01\\x02'
-pos = max(0, len(data) - 70000)
-while pos < len(data) - 4:
-    if data[pos:pos+4] == cd_sig:
-        fname_len  = struct.unpack_from('<H', data, pos+28)[0]
-        fname = data[pos+46:pos+46+fname_len]
-        if fname == target:
-            csize      = struct.unpack_from('<I', data, pos+20)[0]
-            usize      = struct.unpack_from('<I', data, pos+24)[0]
-            lf_offset  = struct.unpack_from('<I', data, pos+42)[0]
-            extra_len  = struct.unpack_from('<H', data, lf_offset+28)[0]
-            payload_start = lf_offset + 30 + fname_len + extra_len
-            payload = data[payload_start:payload_start+csize]
-            content = zlib.decompress(payload, -15)
-            sys.stdout.buffer.write(content)
-            sys.exit(0)
-    pos += 1
-sys.exit(2)
-`;
-  const res = spawnSync('python3', ['-c', script, zipPath], {
-    maxBuffer: 100 * 1024 * 1024,
-  });
-  if (res.error) throw new Error(`python3 error: ${res.error.message}`);
-  if (res.status !== 0) {
-    throw new Error(`Extraction Python échouée (code=${res.status}) — Base_OP_2024_L1300.csv introuvable dans ${zipPath}`);
-  }
-  if (!res.stdout || (res.stdout as Buffer).length === 0) {
-    throw new Error(`Extraction Python : stdout vide`);
-  }
-  return res.stdout as Buffer;
+  return extractFromZip(zipPath, 'Base_OP_2024_L1300.csv');
 }
 
 function isAllEmpty(cols: string[], ...indices: number[]): boolean {
