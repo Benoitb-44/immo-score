@@ -12,7 +12,7 @@ export default defineConfig({
     environment: 'node',
     coverage: {
       provider: 'v8',
-      include: ['src/lib/financial-calc.ts'],
+      include: ['src/lib/financial-calc.ts', 'src/lib/repositories/loyer.repository.ts'],
       reporter: ['text', 'json-summary'],
       thresholds: {
         lines: 95,
