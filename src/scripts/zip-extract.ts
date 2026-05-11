@@ -46,7 +46,6 @@ function extractEntry(data: Buffer, entryName: string, zipPath: string): Buffer 
 
     const method     = data.readUInt16LE(pos + 10);
     const csize      = data.readUInt32LE(pos + 20);
-    const usize      = data.readUInt32LE(pos + 24);
     const fnLen      = data.readUInt16LE(pos + 28);
     const extraLen   = data.readUInt16LE(pos + 30);
     const commentLen = data.readUInt16LE(pos + 32);
