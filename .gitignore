@@ -1,3 +1,6 @@
+# local dev overrides
+docker-compose.override.yml
+
 # dependencies
 node_modules/
 .pnp

@@ -6,6 +6,139 @@
 
 ---
 
+## Session 2026-05-11 — DATA-v4-LOY-3M PR #9 : PATCH 2+3 + validation AMP locale
+
+**Agent(s)** : `@data-engineer`  
+**Branche** : `feature/data-v4-loy-3m-ingestion`
+
+### Patches appliqués
+
+| Patch | Contenu | Statut |
+|-------|---------|--------|
+| PATCH 2 | Colonnes explicites + `findColStrict` (throw si absent, no fallback) sur 3 scripts | ✅ |
+| PATCH 3 | `INSERT...SELECT...WHERE EXISTS` + `ON CONFLICT` idempotent sur 3 scripts | ✅ |
+| Fix readline | `readline for-await` → `split('\n')` (ERR_USE_AFTER_CLOSE sur L6900 435 KB) | ✅ |
+| Fix ES2017 | `Promise<bigint>/0n` → `Promise<number>/0` (cible tsconfig ES2017) | ✅ |
+
+### Réécriture AMP (source découverte en probe local)
+
+**Source réelle** : `Base_OP_2024_L1300.zip` (observatoires-des-loyers.org, format OLL standard 28 colonnes Latin-1). L'ancienne architecture IRIS/arrondissement (data.ampmetropole.fr) était basée sur une source inexistante.
+
+Le ZIP L1300 a un central directory non-standard (unzip/python zipfile échouent) — extraction via Python struct+zlib en fallback intégré dans le script.
+
+Nouvelle logique : filtre aggregate (toutes 9 colonnes sous-population vides) → 1 ligne unique → loyer_median=13.0, q1=10.9, q3=15.6, nb_obs=29778.
+
+### Validation locale 3/3 — Witnesses confirmés
+
+```sql
+-- Output exact local :
+-- 13055 | 13 | 10.90 | 15.60 | 29778 | oll_amp   | 2024
+-- 69123 | 13.95 | 12.21 | 16.07 | 12221 | oll_lyon  | 2024
+-- 75056 | 26.6 | 23.20 | 30.30 | 3686  | oll_paris | 2024
+```
+
+### Yields bruts (avec prix DVF médians de référence)
+
+| Commune | loyer_m2 | prix_m2_ref | yield_brut | Tolérance |
+|---------|----------|-------------|------------|-----------|
+| 75056 Paris | 26.6 | 10 200 | 3.13% | [2.5%, 3.5%] ✅ |
+| 69123 Lyon | 13.95 | 4 300 | 3.89% | [3.2%, 5.0%] ✅ |
+| 13055 Marseille | 13.0 | 2 900 | 5.38% | [4.5%, 6.0%] ✅ |
+
+### Commits de cette session
+
+- `data(v4-loy-3m): PATCH 2+3 — colonnes explicites + WHERE EXISTS upsert (Paris/Lyon/AMP)`
+- `data(v4-loy-3m): PATCH 1 AMP — réécriture complète ingest-loyers-oll-amp.ts`
+
+### Commentaire PR #9
+
+Posté avec witnesses 3/3 + yields 3/3 + confirmation noms colonnes AMP. Statut : **prêt pour review merge final** (validation Data Scientist humain requise avant merge).
+
+---
+
+## Session 2026-05-07 — DATA-v4-LOY-3M Step 3 : Ingestion OLL Paris / Lyon / AMP
+
+**Agent(s)** : `@data-engineer`  
+**Branche** : `feature/data-v4-loy-3m-ingestion`
+
+### Livrables
+
+| Fichier | Statut |
+|---------|--------|
+| `src/scripts/ingest-loyers-olap-paris.ts` | ✅ Créé — OLL Paris intra-muros → 75056 N1bis |
+| `src/scripts/ingest-loyers-oll-lyon.ts` | ✅ Créé — OLL Lyon C1/C2/C3 → 69123 N1bis (agrégation pondérée) |
+| `src/scripts/ingest-loyers-oll-amp.ts` | ✅ Créé — OLL AMP IRIS → 13055 N1bis (2 étapes pondération) |
+| `package.json` | ✅ Modifié — +3 scripts `ingest:oll-paris`, `ingest:oll-lyon`, `ingest:oll-amp` |
+
+### Architecture commune des scripts
+
+- Lecture ZIP latin-1 via `unzip -p` (Paris/Lyon) ou fichiers CSV locaux UTF-8 BOM (AMP)
+- Détection souple des headers CSV (multi-variantes case-insensitive)
+- Witness probe step 2 avant upsert : échec = STOP (exit 1)
+- UPSERT `ON CONFLICT (commune_id)` : N1 → N1bis pour 75056/69123/13055 ; 34 841 autres communes N1 intactes
+- Colonnes ANIL spécifiques (`loyer_m2_ic_low`, `typpred`, `nb_obs`, `r2_adj`) nullées sur UPDATE
+
+### Particularités OLL Lyon
+
+- Filtre `epoque_construction_homogene = ''` (toutes époques — reprobe step 2bis validé)
+- Agrégation pondérée nb_obs : C1(14,4×3237) + C2(14,0×4162) + C3(13,6×4822) → ≈13,95 €/m²
+- Q1/Q3 agrégés avec même pondération
+
+### Particularités OLL AMP
+
+- Lecture locale `/tmp/probe-loyers/amp-loyers.csv` (pré-téléchargé probe) + `L1300Zonage2024.csv`
+- Étape 1 : IRIS → 16 arrondissements (13201-13216) — log JSON `/tmp/loyers-amp-arrondissements.json`
+- Étape 2 : arrondissements → 13055 — codes 13201-13216 non persistés (absents de `communes`)
+
+### Witnesses attendus (à valider sur VPS)
+
+```sql
+SELECT commune_id, loyer_m2, nb_obs_src, niveau, source
+FROM immo_score.loyer_communes
+WHERE commune_id IN ('75056','69123','13055') AND niveau = 'N1bis';
+```
+
+Tolérances : 75056=26,6 exact | 69123∈[13,7;14,2] | 13055∈[11;13]
+
+### Validation TypeScript
+
+`tsc --noEmit --strict` ✅ (0 erreur)
+
+---
+
+## Session 2026-05-03 — DATA-v4-LOY-3M Phase 2 Step 1 : Migration Prisma LoyerCommune
+
+**Agent(s)** : `@data-engineer`  
+**Branche** : `claude/loyer-source-tracking-prisma-loy3m` → PR #8
+
+### Livrables
+
+| Fichier | Statut |
+|---------|--------|
+| `prisma/schema.prisma` | ✅ Modifié — +6 colonnes + @@index([niveau, source]) sur LoyerCommune |
+| `prisma/migrations/migration_lock.toml` | ✅ Créé — init dossier migrations |
+| `prisma/migrations/20260503000000_add_loyer_source_tracking/migration.sql` | ✅ Créé — ADD COLUMN nullable → backfill N1 → SET NOT NULL → CREATE INDEX |
+| `.gitignore` | ✅ Modifié — retire prisma/migrations/ de l'exclusion |
+
+### Changements schéma
+
+Table `loyer_communes` : +`niveau` (NOT NULL), +`source` (NOT NULL), +`millesime` (NOT NULL), +`nbObs` (nullable), +`q1M2` Decimal(6,2)?, +`q3M2` Decimal(6,2)? + index composite `(niveau, source)`.
+
+### Note architecturale
+
+Ce PR initie le passage de `prisma db push` à `prisma migrate` pour les évolutions de schéma comportant du backfill. Le dossier `prisma/migrations/` est désormais versionné.
+
+### VPS apply (après merge PR #8)
+
+Migration SQL à appliquer manuellement — voir instructions dans la PR. Test attendu :  
+`SELECT niveau, source, COUNT(*) FROM loyer_communes GROUP BY niveau, source;` → ~34 844 lignes N1 / carte_loyers_anil.
+
+### Validation TypeScript
+
+`prisma generate` ✅ · `tsc --noEmit` ✅ (0 erreur)
+
+---
+
 ## Session 2026-05-01 — MONET-v4-CALC : lib calcul financier locatif
 
 **Agent(s)** : `@backend`  
