@@ -6,6 +6,56 @@
 
 ---
 
+## Session 2026-05-11 — DATA-v4-LOY-3M PR #9 : PATCH 2+3 + validation AMP locale
+
+**Agent(s)** : `@data-engineer`  
+**Branche** : `feature/data-v4-loy-3m-ingestion`
+
+### Patches appliqués
+
+| Patch | Contenu | Statut |
+|-------|---------|--------|
+| PATCH 2 | Colonnes explicites + `findColStrict` (throw si absent, no fallback) sur 3 scripts | ✅ |
+| PATCH 3 | `INSERT...SELECT...WHERE EXISTS` + `ON CONFLICT` idempotent sur 3 scripts | ✅ |
+| Fix readline | `readline for-await` → `split('\n')` (ERR_USE_AFTER_CLOSE sur L6900 435 KB) | ✅ |
+| Fix ES2017 | `Promise<bigint>/0n` → `Promise<number>/0` (cible tsconfig ES2017) | ✅ |
+
+### Réécriture AMP (source découverte en probe local)
+
+**Source réelle** : `Base_OP_2024_L1300.zip` (observatoires-des-loyers.org, format OLL standard 28 colonnes Latin-1). L'ancienne architecture IRIS/arrondissement (data.ampmetropole.fr) était basée sur une source inexistante.
+
+Le ZIP L1300 a un central directory non-standard (unzip/python zipfile échouent) — extraction via Python struct+zlib en fallback intégré dans le script.
+
+Nouvelle logique : filtre aggregate (toutes 9 colonnes sous-population vides) → 1 ligne unique → loyer_median=13.0, q1=10.9, q3=15.6, nb_obs=29778.
+
+### Validation locale 3/3 — Witnesses confirmés
+
+```sql
+-- Output exact local :
+-- 13055 | 13 | 10.90 | 15.60 | 29778 | oll_amp   | 2024
+-- 69123 | 13.95 | 12.21 | 16.07 | 12221 | oll_lyon  | 2024
+-- 75056 | 26.6 | 23.20 | 30.30 | 3686  | oll_paris | 2024
+```
+
+### Yields bruts (avec prix DVF médians de référence)
+
+| Commune | loyer_m2 | prix_m2_ref | yield_brut | Tolérance |
+|---------|----------|-------------|------------|-----------|
+| 75056 Paris | 26.6 | 10 200 | 3.13% | [2.5%, 3.5%] ✅ |
+| 69123 Lyon | 13.95 | 4 300 | 3.89% | [3.2%, 5.0%] ✅ |
+| 13055 Marseille | 13.0 | 2 900 | 5.38% | [4.5%, 6.0%] ✅ |
+
+### Commits de cette session
+
+- `data(v4-loy-3m): PATCH 2+3 — colonnes explicites + WHERE EXISTS upsert (Paris/Lyon/AMP)`
+- `data(v4-loy-3m): PATCH 1 AMP — réécriture complète ingest-loyers-oll-amp.ts`
+
+### Commentaire PR #9
+
+Posté avec witnesses 3/3 + yields 3/3 + confirmation noms colonnes AMP. Statut : **prêt pour review merge final** (validation Data Scientist humain requise avant merge).
+
+---
+
 ## Session 2026-05-07 — DATA-v4-LOY-3M Step 3 : Ingestion OLL Paris / Lyon / AMP
 
 **Agent(s)** : `@data-engineer`  
