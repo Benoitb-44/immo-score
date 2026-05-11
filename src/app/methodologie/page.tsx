@@ -199,6 +199,141 @@ export default function MethodologiePage() {
             </div>
           </div>
 
+          {/* Loyers de référence */}
+          <div id="loyers" className="border-2 border-ink bg-paper mt-6">
+            <div className="border-b-2 border-ink px-5 py-3 bg-ink">
+              <p className="font-mono text-xs text-paper tracking-widest uppercase">
+                Loyers de référence — Couverture territoriale
+              </p>
+            </div>
+            <div className="divide-y-2 divide-ink">
+              <div className="px-5 py-5">
+                <p className="font-sans text-sm text-ink leading-relaxed mb-4">
+                  CityRank utilise quatre sources publiques pour couvrir l&apos;intégralité du territoire
+                  métropolitain. Chaque source est sélectionnée selon une{' '}
+                  <strong className="text-ink">hiérarchie de précision</strong> : plus la source est
+                  locale et exhaustive, plus elle prévaut.
+                </p>
+                <p className="font-mono text-xs tracking-widest uppercase text-ink-muted mb-3">
+                  Cartographie des sources
+                </p>
+                <div className="border-2 border-ink overflow-x-auto">
+                  <div className="grid grid-cols-[2fr_2fr_1fr_1fr_1fr] border-b-2 border-ink divide-x-2 divide-ink bg-ink min-w-[640px]">
+                    {['Source', 'Périmètre', 'Communes', 'Millésime', 'Granularité'].map((h) => (
+                      <div key={h} className="px-4 py-2">
+                        <p className="font-mono text-[10px] text-paper tracking-widest uppercase">{h}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {[
+                    { source: 'ANIL/Cerema Carte Loyers', perimetre: 'France hors métropoles 3M', communes: '~34 800', millesime: '2023', granularite: 'Commune' },
+                    { source: 'OLAP (Paris)', perimetre: '75056 — Paris', communes: '1', millesime: '2024', granularite: 'Commune' },
+                    { source: 'OLL Lyon', perimetre: '69123 — Lyon', communes: '1', millesime: '2024', granularite: 'Commune' },
+                    { source: 'OLL AMP (Marseille)', perimetre: '13055 — Marseille', communes: '1', millesime: '2024', granularite: 'Commune' },
+                  ].map((row, i) => (
+                    <div
+                      key={row.source}
+                      className={`grid grid-cols-[2fr_2fr_1fr_1fr_1fr] divide-x-2 divide-ink min-w-[640px] ${i < 3 ? 'border-b-2 border-ink' : ''}`}
+                    >
+                      <div className="px-4 py-3">
+                        <p className="font-display font-semibold text-ink text-sm">{row.source}</p>
+                      </div>
+                      <div className="px-4 py-3">
+                        <p className="font-sans text-xs text-ink-muted">{row.perimetre}</p>
+                      </div>
+                      <div className="px-4 py-3">
+                        <p className="font-mono text-sm tabular-nums text-ink">{row.communes}</p>
+                      </div>
+                      <div className="px-4 py-3">
+                        <p className="font-mono text-sm tabular-nums text-ink">{row.millesime}</p>
+                      </div>
+                      <div className="px-4 py-3">
+                        <p className="font-sans text-xs text-ink-muted">{row.granularite}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="px-5 py-5">
+                <p className="font-mono text-xs tracking-widest uppercase text-ink-muted mb-2">
+                  Pourquoi cette hiérarchie
+                </p>
+                <p className="font-sans text-sm text-ink leading-relaxed mb-3">
+                  La Carte Loyers ANIL/Cerema est la source nationale de référence, publiée par le
+                  ministère du Logement. Elle ne couvre cependant pas Paris, Lyon et Marseille — ces
+                  trois métropoles disposent de leur observatoire local des loyers (OLL), dispositif
+                  agréé par l&apos;État qui produit des statistiques plus précises grâce à des collectes
+                  locales massives.
+                </p>
+                <p className="font-sans text-sm text-ink-muted leading-relaxed">
+                  Quand une commune est couverte simultanément par ANIL et un OLL, CityRank
+                  privilégie systématiquement la donnée OLL — variance locale plus fine, volumes
+                  d&apos;observations supérieurs, quartiles disponibles.
+                </p>
+              </div>
+              <div className="px-5 py-5">
+                <p className="font-mono text-xs tracking-widest uppercase text-ink-muted mb-2">
+                  Transparence des données affichées
+                </p>
+                <p className="font-sans text-sm text-ink leading-relaxed mb-3">
+                  Chaque page commune affiche le loyer médian (€/m² CC) tel qu&apos;il provient de la
+                  source primaire de cette commune. Lorsque la source est un OLL, deux informations
+                  supplémentaires sont disponibles :
+                </p>
+                <ul className="space-y-1 mb-3">
+                  {[
+                    { label: 'Quartiles Q1 / Q3', desc: 'intervalle interquartile (50 % des loyers observés)' },
+                    { label: "Nombre d'observations", desc: 'volume de la collecte locale (gage de robustesse)' },
+                  ].map((item) => (
+                    <li key={item.label} className="flex items-start gap-2">
+                      <span className="font-mono text-xs text-ink-muted mt-0.5 shrink-0">—</span>
+                      <p className="font-sans text-sm text-ink-muted leading-relaxed">
+                        <strong className="text-ink">{item.label}</strong> : {item.desc}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+                <p className="font-sans text-sm text-ink-muted leading-relaxed">
+                  La Carte Loyers ANIL ne publie que le loyer médian, sans quartiles ni volumétrie
+                  communaux — CityRank affiche alors uniquement le médian.
+                </p>
+              </div>
+              <div className="px-5 py-5">
+                <p className="font-mono text-xs tracking-widest uppercase text-ink-muted mb-2">
+                  Méthodologie d&apos;ingestion
+                </p>
+                <p className="font-sans text-sm text-ink-muted leading-relaxed">
+                  Aucun filtre époque de construction n&apos;est appliqué à l&apos;ingestion : CityRank lit les
+                  loyers toutes époques confondues pour rester représentatif du parc locatif réel
+                  d&apos;une commune, y compris l&apos;haussmannien et l&apos;ancien.
+                </p>
+              </div>
+              <div className="divide-y-2 divide-ink">
+                {[
+                  { label: 'ANIL/Cerema — data.gouv.fr · Carte des loyers 2023', href: 'https://www.data.gouv.fr/datasets/carte-des-loyers-indicateurs-de-loyers-d-annonce-par-commune-en-2023/' },
+                  { label: 'OLAP (Paris) — observatoire-des-loyers.fr', href: 'https://www.observatoire-des-loyers.fr/' },
+                  { label: 'OLL Lyon — observatoire-loyers-lyon.org', href: 'https://www.observatoire-loyers-lyon.org/' },
+                  { label: 'OLL AMP (Marseille) — urcaue-paca.com', href: 'https://www.urcaue-paca.com/oll-aix-marseille-provence' },
+                ].map((src) => (
+                  <a
+                    key={src.href}
+                    href={src.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between px-5 py-4 hover:bg-paper-soft transition-colors group"
+                  >
+                    <p className="font-mono text-sm font-bold text-ink group-hover:text-accent transition-colors">
+                      {src.label}
+                    </p>
+                    <span className="font-mono text-xs text-ink-muted group-hover:text-accent transition-colors shrink-0 ml-4">
+                      ↗
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {/* BPE */}
           <div className="border-2 border-ink bg-paper mt-6">
             <div className="border-b-2 border-ink px-5 py-3 bg-ink">
