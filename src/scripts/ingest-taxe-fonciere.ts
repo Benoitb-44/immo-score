@@ -23,7 +23,8 @@
  *   npm run ingest:taxe-fonciere -- --dept=33       (département ciblé)
  */
 
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { createInterface } from 'readline';
 import { Readable } from 'stream';
 
@@ -206,7 +207,28 @@ async function upsertBatch(rows: TfRow[]): Promise<{ inserted: number; errors: s
     const batch = rows.slice(i, i + BATCH_SIZE);
 
     try {
-      await prisma.$executeRaw`
+      // FIX 22P03 : Prisma's binary protocol encodes nullable typed arrays
+      // (float8[], text[]) incorrectly when values are mixed null/non-null.
+      // Using VALUES + Prisma.sql/join passes each column as an individual
+      // scalar parameter — Prisma handles scalar NULL correctly.
+      const valueFragments = batch.map(r =>
+        Prisma.sql`(
+          ${randomUUID()}::text,
+          ${r.code_commune}::text,
+          ${r.montant_tfb_communal}::float8,
+          ${r.montant_tfb_epci}::float8,
+          ${r.montant_tfb_total}::float8,
+          ${r.base_nette}::float8,
+          ${r.taux_communal_pct}::float8,
+          ${r.taux_epci_pct}::float8,
+          ${MILLESIME}::int,
+          ${'ofgl-rei'}::text,
+          ${r.secret_statistique}::bool,
+          ${r.sec_stat_reason}::text
+        )`
+      );
+
+      await prisma.$executeRaw(Prisma.sql`
         INSERT INTO immo_score.taxe_fonciere_communes
           (id, code_commune,
            montant_tfb_communal, montant_tfb_epci, montant_tfb_total,
@@ -214,32 +236,18 @@ async function upsertBatch(rows: TfRow[]): Promise<{ inserted: number; errors: s
            millesime, source, secret_statistique, sec_stat_reason,
            created_at, updated_at)
         SELECT
-          gen_random_uuid()::text,
-          t.code_commune,
-          t.montant_tfb_communal, t.montant_tfb_epci, t.montant_tfb_total,
-          t.base_nette, t.taux_communal_pct, t.taux_epci_pct,
-          ${MILLESIME}::int, 'ofgl-rei',
-          t.secret_statistique, t.sec_stat_reason,
+          v.id, v.code_commune,
+          v.montant_tfb_communal, v.montant_tfb_epci, v.montant_tfb_total,
+          v.base_nette, v.taux_communal_pct, v.taux_epci_pct,
+          v.millesime, v.source, v.secret_statistique, v.sec_stat_reason,
           NOW(), NOW()
-        FROM UNNEST(
-          ${batch.map(r => r.code_commune)}::text[],
-          ${batch.map(r => r.montant_tfb_communal)}::float8[],
-          ${batch.map(r => r.montant_tfb_epci)}::float8[],
-          ${batch.map(r => r.montant_tfb_total)}::float8[],
-          ${batch.map(r => r.base_nette)}::float8[],
-          ${batch.map(r => r.taux_communal_pct)}::float8[],
-          ${batch.map(r => r.taux_epci_pct)}::float8[],
-          ${batch.map(r => r.secret_statistique)}::bool[],
-          ${batch.map(r => r.sec_stat_reason)}::text[]
-        ) AS t(
-          code_commune,
+        FROM (VALUES ${Prisma.join(valueFragments)}) AS v(
+          id, code_commune,
           montant_tfb_communal, montant_tfb_epci, montant_tfb_total,
           base_nette, taux_communal_pct, taux_epci_pct,
-          secret_statistique, sec_stat_reason
+          millesime, source, secret_statistique, sec_stat_reason
         )
-        WHERE EXISTS (
-          SELECT 1 FROM immo_score.communes c WHERE c.code_insee = t.code_commune
-        )
+        JOIN immo_score.communes c ON c.code_insee = v.code_commune
         ON CONFLICT (code_commune) DO UPDATE SET
           montant_tfb_communal = EXCLUDED.montant_tfb_communal,
           montant_tfb_epci     = EXCLUDED.montant_tfb_epci,
@@ -252,7 +260,7 @@ async function upsertBatch(rows: TfRow[]): Promise<{ inserted: number; errors: s
           secret_statistique   = EXCLUDED.secret_statistique,
           sec_stat_reason      = EXCLUDED.sec_stat_reason,
           updated_at           = NOW()
-      `;
+      `);
       inserted += batch.length;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
