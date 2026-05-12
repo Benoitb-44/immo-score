@@ -351,3 +351,61 @@ describe('Edge cases', () => {
     expect(() => calculateAll({ ...BASE, tmi: 1.1 })).toThrow('tmi');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. Witnesses OFGL 2024 — TF réelle calibrée (DATA-v4-TF)
+//    tf_an = montant_tfb_total estimé pour un bien 50m² (commune + EPCI)
+//    Sources : probe OFGL 2024 (taux voté × base cadastrale 50m²)
+//      Paris     : taux 20.50%, tf_an ≈  820 € (base ~4 000 €)
+//      Lyon      : taux 32.44% (commune 31.89% + GFP 0.55%), tf_an ≈ 1 460 €
+//      Bordeaux  : taux 48.48%, tf_an ≈ 1 212 € (base ~2 500 €)
+//      Marseille : taux 44.54%, tf_an ≈ 1 247 € (base ~2 800 €)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const OFGL_FIXTURES = [
+  { nom: 'Paris',     prix_m2: 10_500, loyer_mensuel: 850, tf_an:   820 },
+  { nom: 'Lyon',      prix_m2:  5_000, loyer_mensuel: 650, tf_an: 1_460 },
+  { nom: 'Bordeaux',  prix_m2:  4_500, loyer_mensuel: 600, tf_an: 1_212 },
+  { nom: 'Marseille', prix_m2:  3_500, loyer_mensuel: 550, tf_an: 1_247 },
+] as const;
+
+describe('Witnesses OFGL 2024 — TF réelle calibrée (DATA-v4-TF)', () => {
+  it('yield_net < yield_brut pour les 4 métropoles', () => {
+    for (const f of OFGL_FIXTURES) {
+      const r = calculateAll({ ...BASE, prix_m2: f.prix_m2, loyer_mensuel: f.loyer_mensuel, tf_an: f.tf_an });
+      expect(r.yield_net, `${f.nom}: yield_net doit être < yield_brut`).toBeLessThan(r.yield_brut);
+    }
+  });
+
+  it('écart yield_brut − yield_net ≥ impact direct TF (tf_an / prix_acquisition × 100)', () => {
+    // La TF seule réduit le rendement net d-au moins sa contribution directe
+    for (const f of OFGL_FIXTURES) {
+      const r = calculateAll({ ...BASE, prix_m2: f.prix_m2, loyer_mensuel: f.loyer_mensuel, tf_an: f.tf_an });
+      const prix_acq = f.prix_m2 * BASE.surface;
+      const tf_direct_pct = (f.tf_an / prix_acq) * 100;
+      const ecart = r.yield_brut - r.yield_net;
+      expect(ecart, `${f.nom}: écart ≥ impact TF direct`).toBeGreaterThanOrEqual(tf_direct_pct);
+    }
+  });
+
+  it('Bordeaux (taux 48%) pèse plus que Paris (taux 20%) sur le même surface 50m²', () => {
+    // TF burden = tf_an / prix_acquisition — doit être plus élevé à Bordeaux
+    const paris     = OFGL_FIXTURES.find(f => f.nom === 'Paris')!;
+    const bordeaux  = OFGL_FIXTURES.find(f => f.nom === 'Bordeaux')!;
+    const burden_paris    = paris.tf_an    / (paris.prix_m2    * BASE.surface);
+    const burden_bordeaux = bordeaux.tf_an / (bordeaux.prix_m2 * BASE.surface);
+    expect(burden_bordeaux).toBeGreaterThan(burden_paris);
+    // Les deux yields_net restent finis
+    const rP = calculateAll({ ...BASE, prix_m2: paris.prix_m2,    loyer_mensuel: paris.loyer_mensuel,    tf_an: paris.tf_an });
+    const rB = calculateAll({ ...BASE, prix_m2: bordeaux.prix_m2, loyer_mensuel: bordeaux.loyer_mensuel, tf_an: bordeaux.tf_an });
+    expect(isFinite(rP.yield_net)).toBe(true);
+    expect(isFinite(rB.yield_net)).toBe(true);
+  });
+
+  it('tous les résultats sont finis (no NaN/Infinity avec TF réelle OFGL)', () => {
+    for (const f of OFGL_FIXTURES) {
+      const r = calculateAll({ ...BASE, prix_m2: f.prix_m2, loyer_mensuel: f.loyer_mensuel, tf_an: f.tf_an });
+      assertAllFinite(r as unknown as Record<string, number>, `OFGL/${f.nom}`);
+    }
+  });
+});

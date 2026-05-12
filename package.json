@@ -22,6 +22,7 @@
     "ingest:cerema": "tsx src/scripts/ingest-cerema-accessibilite.ts",
     "ingest:aav": "tsx src/scripts/ingest-aav-mapping.ts",
     "ingest:tf": "tsx src/scripts/ingest-tf.ts",
+    "ingest:taxe-fonciere": "tsx src/scripts/ingest-taxe-fonciere.ts",
     "ingest:loyers": "tsx src/scripts/ingest-loyers.ts",
     "ingest:oll-paris": "tsx src/scripts/ingest-loyers-olap-paris.ts",
     "ingest:oll-lyon": "tsx src/scripts/ingest-loyers-oll-lyon.ts",
@@ -32,6 +33,7 @@
     "test:scoring": "tsx src/scripts/test-scoring.ts",
     "test:scoring-v2": "tsx src/scripts/test-scoring-v2.ts",
     "test:accessibilite": "tsx src/scripts/test-accessibilite.ts",
+    "test:taxe-fonciere": "tsx src/scripts/test-taxe-fonciere.ts",
     "test:calc": "vitest run --coverage src/lib/__tests__/financial-calc.test.ts",
     "probe:loyers": "tsx scripts/probe-xlsx.ts --url=https://www.data.gouv.fr/api/1/datasets/r/34434cef-2f85-43b9-a601-c625ee426cb7 --name=\"Carte Loyers 2023 (ANIL/Cerema)\" --output=docs/probes/probe-cartes-loyers-2023.md --download-dir=data/cartes-loyers/current",
     "probe:rei": "tsx scripts/probe-xlsx.ts --url=https://static.data.gouv.fr/resources/impots-locaux/20210930-121834/fiscalite-directe-locale-deliberations-taux-2020.zip --name=\"DGFiP REI fiscalité locale (2020)\" --output=docs/probes/probe-dgfip-rei-2024.md --download-dir=data/dgfip-rei/current"
