@@ -72,8 +72,9 @@ model Commune {
   filosofi_v2       FilosofiCommune?
   score_commune     ScoreCommune?
   score_profiles    ScoreProfile[]
-  fiscalite_commune FiscaliteCommune?
-  loyer_commune     LoyerCommune?
+  fiscalite_commune    FiscaliteCommune?
+  loyer_commune        LoyerCommune?
+  taxe_fonciere        TaxeFonciereCommune?
 
   @@map("communes")
 }
@@ -471,4 +472,37 @@ model LoyerCommune {
 
   @@index([niveau, source])
   @@map("loyer_communes")
+}
+
+// ─────────────────────────────────────────────
+// Table 16 : taxe_fonciere_communes (v4-TF)
+// Taxe Foncière Bâtie par commune — OFGL REI 2024
+// Source : data.ofgl.fr — Licence Ouverte Etalab v2.0
+// var codes : E11=base_nette, E13=montant_commune, E12VOTE=taux_commune
+//             E31=base_nette_gfp, E33=montant_gfp, E32VOTE=taux_gfp
+// Remplace FiscaliteCommune pour le pipeline v4 (millésime 2024, cumul commune+EPCI)
+// ─────────────────────────────────────────────
+
+model TaxeFonciereCommune {
+  id           String @id @default(cuid())
+  code_commune String @unique
+
+  montant_tfb_communal Float?  // E13 : produit réel TFB commune (€/an)
+  montant_tfb_epci     Float?  // E33 : produit réel TFB GFP/EPCI (€/an, null si EPCI sans TFB)
+  montant_tfb_total    Float?  // E13 + E33 (€/an) — charge annuelle réelle propriétaire
+  base_nette           Float?  // E11 : base nette TFB commune (€)
+  taux_communal_pct    Float?  // E12VOTE : taux voté communal (%)
+  taux_epci_pct        Float?  // E32VOTE : taux voté GFP/EPCI (%, null si EPCI sans TFB)
+  millesime            Int     @default(2024)
+  source               String  @default("ofgl-rei")
+  secret_statistique   Boolean @default(false)
+  sec_stat_reason      String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  commune Commune @relation(fields: [code_commune], references: [code_insee], onDelete: Cascade)
+
+  @@index([taux_communal_pct])
+  @@map("taxe_fonciere_communes")
 }
