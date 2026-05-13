@@ -14,6 +14,7 @@ import SousScoreV4, { type NiveauFallback } from '@/components/SousScoreV4';
 import RentalCalculator from '@/components/RentalCalculator';
 import { getLoyerForCommune } from '@/lib/repositories/loyer.repository';
 import { getTaxeFonciereForCommune } from '@/lib/repositories/taxe-fonciere.repository';
+import { getRpLogementForCommune } from '@/lib/repositories/rp-logement';
 import { DEFAULT_SURFACE } from '@/lib/constants/market-rates';
 
 export const revalidate = 86400; // ISR 24h
@@ -152,7 +153,7 @@ export default async function CommunePage({
 
   const currentGlobalScore = commune.score?.score_global ?? null;
 
-  const [dvfRows, dpeRows, risquesList, sameDeptCommunes, similarScoreCommunes, loyer, taxeFonciere, filosofiData] = await Promise.all([
+  const [dvfRows, dpeRows, risquesList, sameDeptCommunes, similarScoreCommunes, loyer, taxeFonciere, filosofiData, rpLogement] = await Promise.all([
     prisma.$queryRaw<{ prix_m2_median: string | null; tx_per_hab: string | null }[]>`
       SELECT
         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY d.prix_m2)::text AS prix_m2_median,
@@ -205,6 +206,7 @@ export default async function CommunePage({
       WHERE code_commune = ${commune.code_insee}
       LIMIT 1
     `.catch(() => [] as { nb_logements: number | null; surface_moy: number | null }[]),
+    getRpLogementForCommune(commune.code_insee, prisma),
   ]);
 
   const prixM2Median = dvfRows[0]?.prix_m2_median
@@ -440,6 +442,7 @@ export default async function CommunePage({
             prixM2Dvf={prixM2Median}
             surfaceMoyFilosofi={surfaceMoyFilosofi}
             nbLogementsFilosofi={nbLogementsFilosofi}
+            rpLogement={rpLogement}
           />
         </div>
 

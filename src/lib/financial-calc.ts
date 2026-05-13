@@ -172,6 +172,48 @@ export function calculateFiscalite(inputs: CalcInputs): {
   return { revenu_imposable, impot_an };
 }
 
+// ─── TFB estimation via RP Logement (nb_pieces_moy proxy) ────────────────────
+
+// INSEE Enquête Logement 2020 : 93.2 m² ÷ 4 pièces = 23.3 m²/pièce
+export const SURFACE_PAR_PIECE_M2 = 23.3;
+
+export interface TfbFromRpParams {
+  surfaceUserM2: number;
+  tfbMoyenParLogementCommune: number;
+  nbPiecesMoyCommune: number;
+}
+
+export interface TfbFromRpResult {
+  tfb: number | null;
+  methodology: string;
+}
+
+/**
+ * Estime la TFB annuelle pour un bien en utilisant nb_pieces_moy comme proxy surface.
+ * Formule : piecesUser = surface / 23.3, facteur = piecesUser / nbPiecesMoy, tfb = tfbMoy * facteur
+ */
+export function estimateTfbForBien({
+  surfaceUserM2,
+  tfbMoyenParLogementCommune,
+  nbPiecesMoyCommune,
+}: TfbFromRpParams): TfbFromRpResult {
+  if (surfaceUserM2 <= 0 || tfbMoyenParLogementCommune <= 0 || nbPiecesMoyCommune <= 0) {
+    return { tfb: null, methodology: '' };
+  }
+
+  const piecesUser = surfaceUserM2 / SURFACE_PAR_PIECE_M2;
+  const facteur = piecesUser / nbPiecesMoyCommune;
+  const tfb = tfbMoyenParLogementCommune * facteur;
+
+  return {
+    tfb,
+    methodology:
+      'TFB : estimation INSEE RP 2022, ratio moyen national 23 m²/pièce. Précision limitée Paris (~17) / zones rurales (~25).',
+  };
+}
+
+// ─── calculateAll ─────────────────────────────────────────────────────────────
+
 export function calculateAll(inputs: CalcInputs): CalcOutputs {
   validateInputs(inputs);
 
