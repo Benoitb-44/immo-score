@@ -206,7 +206,7 @@ export default async function CommunePage({
       WHERE code_commune = ${commune.code_insee}
       LIMIT 1
     `.catch(() => [] as { nb_logements: number | null; surface_moy: number | null }[]),
-    getRpLogementForCommune(commune.code_insee, prisma),
+    getRpLogementForCommune(commune.code_insee, prisma).catch(() => null),
   ]);
 
   const prixM2Median = dvfRows[0]?.prix_m2_median

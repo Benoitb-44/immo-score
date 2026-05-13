@@ -20,9 +20,7 @@
  */
 
 import { Prisma, PrismaClient } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync } from 'node:fs';
-import { createWriteStream } from 'node:fs';
+import { existsSync, mkdirSync, createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import XLSX from 'xlsx';
@@ -64,7 +62,7 @@ const SOURCES = {
   com: {
     file: `${DATA_DIR}/base-cc-logement-2022-COM.xlsx`,
     url: 'https://www.insee.fr/fr/statistiques/fichier/8581474/base-cc-logement-2022-COM_xlsx.zip',
-    sheet: 'COM_2022',
+    sheet: 'C.O.M_2022',
     label: 'Collectivités d\'outre-mer (Mayotte)',
   },
 } as const;
@@ -195,9 +193,9 @@ async function upsertBatch(rows: RpRow[]): Promise<{ inserted: number; errors: s
       // FIX 22P03 (anti-bug PR #14) : chaque colonne passée comme scalaire
       // individuel avec cast ::float8 — évite l'encodage incorrect des
       // tableau mixte null/non-null du protocole binaire Prisma.
+      // id SERIAL auto-généré : ne pas inclure dans le INSERT.
       const valueFragments = batch.map(r =>
         Prisma.sql`(
-          ${randomUUID()}::text,
           ${r.code_commune}::text,
           ${r.nb_logements_total}::float8,
           ${r.nb_residences_principales}::float8,
@@ -205,28 +203,31 @@ async function upsertBatch(rows: RpRow[]): Promise<{ inserted: number; errors: s
           ${r.nb_pieces_moy}::float8,
           ${r.nb_prop_occupants}::float8,
           ${MILLESIME}::text,
-          ${'INSEE-RP'}::text
+          ${'INSEE-RP'}::text,
+          NOW(),
+          NOW()
         )`
       );
 
       await prisma.$executeRaw(Prisma.sql`
         INSERT INTO immo_score.insee_rp_logement
-          (id, code_commune,
+          (code_commune,
            nb_logements_total, nb_residences_principales,
            nb_pieces_total_rp, nb_pieces_moy,
            nb_prop_occupants, millesime, source,
            created_at, updated_at)
         SELECT
-          v.id::int, v.code_commune,
+          v.code_commune,
           v.nb_logements_total, v.nb_residences_principales,
           v.nb_pieces_total_rp, v.nb_pieces_moy,
           v.nb_prop_occupants, v.millesime, v.source,
-          NOW(), NOW()
+          v.created_at, v.updated_at
         FROM (VALUES ${Prisma.join(valueFragments)}) AS v(
-          id, code_commune,
+          code_commune,
           nb_logements_total, nb_residences_principales,
           nb_pieces_total_rp, nb_pieces_moy,
-          nb_prop_occupants, millesime, source
+          nb_prop_occupants, millesime, source,
+          created_at, updated_at
         )
         ON CONFLICT (code_commune) DO UPDATE SET
           nb_logements_total        = EXCLUDED.nb_logements_total,

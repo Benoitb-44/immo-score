@@ -2,6 +2,8 @@
 -- Table 17 : parc logement par commune — INSEE RP 2022
 -- Source : base-cc-logement-2022, probe scripts/probes/insee-rp-logement-probe.md
 
+SET search_path TO immo_score;
+
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS "insee_rp_logement" (

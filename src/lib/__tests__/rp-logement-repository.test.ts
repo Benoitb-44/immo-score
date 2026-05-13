@@ -121,8 +121,8 @@ describe('getRpLogementForCommune — commune absente', () => {
   });
 });
 
-describe('getRpLogementForCommune — sécurité division par zéro', () => {
-  it('retourne nb_pieces_moy >= 0 même pour très petite commune', async () => {
+describe('getRpLogementForCommune — très petite commune (5 logements)', () => {
+  it('retourne un DTO valide avec nb_pieces_moy fini et positif', async () => {
     const prisma = makePrisma({
       nbLogementsTotal: 5.0,
       nbResidencesPrincipales: 3.0,
@@ -135,5 +135,21 @@ describe('getRpLogementForCommune — sécurité division par zéro', () => {
     expect(result).not.toBeNull();
     expect(result!.nb_pieces_moy).toBeGreaterThan(0);
     expect(Number.isFinite(result!.nb_pieces_moy)).toBe(true);
+  });
+});
+
+describe('getRpLogementForCommune — nb_pieces_moy = 0 (donnée corrompue)', () => {
+  it('retourne un DTO avec nb_pieces_moy = 0 (la guard division-zéro est dans estimateTfbForBien)', async () => {
+    const prisma = makePrisma({
+      nbLogementsTotal: 10.0,
+      nbResidencesPrincipales: 8.0,
+      nbPiecesMoy: 0,
+      nbPropOccupants: null,
+      millesime: 'RP2022',
+    });
+    const result = await getRpLogementForCommune('01002', prisma);
+
+    expect(result).not.toBeNull();
+    expect(result!.nb_pieces_moy).toBe(0);
   });
 });

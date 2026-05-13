@@ -374,9 +374,13 @@ export default function RentalCalculator({
               <p className="font-mono text-[10px] text-ink-muted mt-1" data-testid="tfb-rp-badge">
                 TFB : estimation INSEE RP 2022, ratio moyen national 23 m²/pièce. Précision limitée Paris (~17) / zones rurales (~25).
               </p>
+            ) : taxeFonciere ? (
+              <p className="font-mono text-[10px] text-ink-muted mt-1" data-testid="tfb-filosofi-fallback-badge">
+                TFB : estimation Filosofi 2021 (données INSEE RP 2022 non disponibles pour cette commune).
+              </p>
             ) : (
-              <p className="font-mono text-[10px] text-ink-muted mt-1" data-testid="tfb-rp-null-badge">
-                Données INSEE millésime 2022 — TFB non disponible
+              <p className="font-mono text-[10px] text-ink-muted mt-1" data-testid="tfb-null-badge">
+                TFB : aucune donnée disponible pour cette commune.
               </p>
             )}
             {!taxeFonciere && (

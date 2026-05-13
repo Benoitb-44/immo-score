@@ -528,3 +528,23 @@ describe('estimateTfbForBien — guards tfbMoy <= 0', () => {
     expect(tfb).toBeNull();
   });
 });
+
+describe('estimateTfbForBien — guards NaN/Infinity', () => {
+  it('retourne tfb=null si surfaceUserM2 = NaN', () => {
+    const { tfb } = estimateTfbForBien({
+      surfaceUserM2: NaN,
+      tfbMoyenParLogementCommune: 1000,
+      nbPiecesMoyCommune: 3.0,
+    });
+    expect(tfb).toBeNull();
+  });
+
+  it('retourne tfb=null si nbPiecesMoyCommune = Infinity', () => {
+    const { tfb } = estimateTfbForBien({
+      surfaceUserM2: 50,
+      tfbMoyenParLogementCommune: 1000,
+      nbPiecesMoyCommune: Infinity,
+    });
+    expect(tfb).toBeNull();
+  });
+});

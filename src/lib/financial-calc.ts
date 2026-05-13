@@ -197,8 +197,15 @@ export function estimateTfbForBien({
   tfbMoyenParLogementCommune,
   nbPiecesMoyCommune,
 }: TfbFromRpParams): TfbFromRpResult {
-  if (surfaceUserM2 <= 0 || tfbMoyenParLogementCommune <= 0 || nbPiecesMoyCommune <= 0) {
-    return { tfb: null, methodology: '' };
+  if (
+    !Number.isFinite(surfaceUserM2) ||
+    !Number.isFinite(tfbMoyenParLogementCommune) ||
+    !Number.isFinite(nbPiecesMoyCommune) ||
+    surfaceUserM2 <= 0 ||
+    tfbMoyenParLogementCommune <= 0 ||
+    nbPiecesMoyCommune <= 0
+  ) {
+    return { tfb: null, methodology: 'Non calculable — données insuffisantes' };
   }
 
   const piecesUser = surfaceUserM2 / SURFACE_PAR_PIECE_M2;
