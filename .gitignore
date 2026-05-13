@@ -48,6 +48,7 @@ next-env.d.ts
 data/cerema/
 data/cartes-loyers/
 data/dgfip-rei/
+data/raw/
 
 # Couverture de tests
 coverage/
