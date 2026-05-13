@@ -24,7 +24,9 @@ import {
 } from '@/lib/constants/market-rates'
 import type { LoyerCommuneData } from '@/lib/repositories/loyer.repository'
 import type { TaxeFonciereData } from '@/lib/repositories/taxe-fonciere.repository'
-import { estimateTfbForBien } from '@/lib/repositories/taxe-fonciere.repository'
+import { estimateTfbForBien as estimateTfbFilosofi } from '@/lib/repositories/taxe-fonciere.repository'
+import type { RpLogementDto } from '@/lib/repositories/rp-logement'
+import { estimateTfbForBien as estimateTfbRp } from '@/lib/financial-calc'
 
 interface Props {
   commune: {
@@ -38,6 +40,7 @@ interface Props {
   prixM2Dvf: number | null
   surfaceMoyFilosofi: number | null
   nbLogementsFilosofi: number | null
+  rpLogement: RpLogementDto | null
 }
 
 const REGIME_LABELS: Record<RegimeFiscal, string> = {
@@ -71,12 +74,24 @@ function fmtPct(n: number): string {
 
 function computeInitialTfAn(
   taxeFonciere: TaxeFonciereData | null,
+  rpLogement: RpLogementDto | null,
   nbLogements: number | null,
   surfaceMoy: number | null,
   surface: number,
 ): number {
   if (!taxeFonciere) return 0
-  const estim = estimateTfbForBien(
+
+  if (rpLogement && taxeFonciere.montant_tfb_total != null && rpLogement.nb_logements_total > 0) {
+    const tfbMoyParLogement = taxeFonciere.montant_tfb_total / rpLogement.nb_logements_total
+    const { tfb } = estimateTfbRp({
+      surfaceUserM2: surface,
+      tfbMoyenParLogementCommune: tfbMoyParLogement,
+      nbPiecesMoyCommune: rpLogement.nb_pieces_moy,
+    })
+    return tfb != null ? Math.round(tfb) : 0
+  }
+
+  const estim = estimateTfbFilosofi(
     taxeFonciere,
     { nb_logements: nbLogements, surface_moy: surfaceMoy },
     surface,
@@ -91,10 +106,12 @@ export default function RentalCalculator({
   prixM2Dvf,
   surfaceMoyFilosofi,
   nbLogementsFilosofi,
+  rpLogement,
 }: Props) {
   const initSurface = Math.round(surfaceMoyFilosofi ?? DEFAULT_SURFACE)
   const initTfAn = computeInitialTfAn(
     taxeFonciere,
+    rpLogement,
     nbLogementsFilosofi,
     surfaceMoyFilosofi,
     initSurface,
@@ -353,6 +370,19 @@ export default function RentalCalculator({
                 TFB estimé — donnée commune non publiée
               </span>
             )}
+            {rpLogement ? (
+              <p className="font-mono text-[10px] text-ink-muted mt-1" data-testid="tfb-rp-badge">
+                TFB : estimation INSEE RP 2022, ratio moyen national 23 m²/pièce. Précision limitée Paris (~17) / zones rurales (~25).
+              </p>
+            ) : taxeFonciere ? (
+              <p className="font-mono text-[10px] text-ink-muted mt-1" data-testid="tfb-filosofi-fallback-badge">
+                TFB : estimation Filosofi 2021 (données INSEE RP 2022 non disponibles pour cette commune).
+              </p>
+            ) : (
+              <p className="font-mono text-[10px] text-ink-muted mt-1" data-testid="tfb-null-badge">
+                TFB : aucune donnée disponible pour cette commune.
+              </p>
+            )}
             {!taxeFonciere && (
               <p className="font-mono text-[10px] text-ink-muted mt-1">
                 Données OFGL non disponibles pour cette commune
@@ -475,7 +505,7 @@ export default function RentalCalculator({
       <div className="border-t-2 border-ink px-6 py-3 flex flex-wrap gap-1 items-center">
         <span className="font-mono text-[10px] font-bold text-ink shrink-0">SOURCES</span>
         <span className="font-mono text-[10px] text-ink-muted">
-          · DVF · OLL/ANIL · OFGL REI 2024 · Filosofi 2021 · {DEFAULT_RATE_SOURCE} mai 2026
+          · DVF · OLL/ANIL · OFGL REI 2024 · INSEE RP 2022 · Filosofi 2021 · {DEFAULT_RATE_SOURCE} mai 2026
         </span>
       </div>
     </div>

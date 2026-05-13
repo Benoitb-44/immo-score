@@ -6,6 +6,8 @@ import {
   calculateCharges,
   calculateFiscalite,
   calculateAll,
+  estimateTfbForBien,
+  SURFACE_PAR_PIECE_M2,
   type CalcInputs,
   type RegimeFiscal,
 } from '../financial-calc';
@@ -407,5 +409,142 @@ describe('Witnesses OFGL 2024 — TF réelle calibrée (DATA-v4-TF)', () => {
       const r = calculateAll({ ...BASE, prix_m2: f.prix_m2, loyer_mensuel: f.loyer_mensuel, tf_an: f.tf_an });
       assertAllFinite(r as unknown as Record<string, number>, `OFGL/${f.nom}`);
     }
+  });
+});
+
+// ─── estimateTfbForBien (RP Logement) ────────────────────────────────────────
+
+describe('estimateTfbForBien — constante SURFACE_PAR_PIECE_M2', () => {
+  it('vaut 23.3 m²/pièce (INSEE Enquête Logement 2020)', () => {
+    expect(SURFACE_PAR_PIECE_M2).toBe(23.3);
+  });
+});
+
+describe('estimateTfbForBien — témoin Paris 50m² [1500, 2500 €]', () => {
+  it('Paris : tfbMoy=2000, nbPiecesMoy=2.6 → résultat dans [1500, 2500]', () => {
+    const { tfb } = estimateTfbForBien({
+      surfaceUserM2: 50,
+      tfbMoyenParLogementCommune: 2000,
+      nbPiecesMoyCommune: 2.6,
+    });
+    expect(tfb).not.toBeNull();
+    expect(tfb!).toBeGreaterThanOrEqual(1500);
+    expect(tfb!).toBeLessThanOrEqual(2500);
+  });
+});
+
+describe('estimateTfbForBien — témoin Lyon 50m² [1200, 1800 €]', () => {
+  it('Lyon : tfbMoy=1700, nbPiecesMoy=2.8 → résultat dans [1200, 1800]', () => {
+    const { tfb } = estimateTfbForBien({
+      surfaceUserM2: 50,
+      tfbMoyenParLogementCommune: 1700,
+      nbPiecesMoyCommune: 2.8,
+    });
+    expect(tfb).not.toBeNull();
+    expect(tfb!).toBeGreaterThanOrEqual(1200);
+    expect(tfb!).toBeLessThanOrEqual(1800);
+  });
+});
+
+describe('estimateTfbForBien — témoin Bordeaux 50m² [800, 1200 €]', () => {
+  it('Bordeaux : tfbMoy=1200, nbPiecesMoy=2.8 → résultat dans [800, 1200]', () => {
+    const { tfb } = estimateTfbForBien({
+      surfaceUserM2: 50,
+      tfbMoyenParLogementCommune: 1200,
+      nbPiecesMoyCommune: 2.8,
+    });
+    expect(tfb).not.toBeNull();
+    expect(tfb!).toBeGreaterThanOrEqual(800);
+    expect(tfb!).toBeLessThanOrEqual(1200);
+  });
+});
+
+describe('estimateTfbForBien — témoin Tulle 50m² [400, 600 €]', () => {
+  it('Tulle : tfbMoy=650, nbPiecesMoy=3.2 → résultat dans [400, 600]', () => {
+    const { tfb } = estimateTfbForBien({
+      surfaceUserM2: 50,
+      tfbMoyenParLogementCommune: 650,
+      nbPiecesMoyCommune: 3.2,
+    });
+    expect(tfb).not.toBeNull();
+    expect(tfb!).toBeGreaterThanOrEqual(400);
+    expect(tfb!).toBeLessThanOrEqual(600);
+  });
+});
+
+describe('estimateTfbForBien — témoin Saint-Pierremont 50m² [150, 300 €]', () => {
+  it('Saint-Pierremont : tfbMoy=300, nbPiecesMoy=3.5 → résultat dans [150, 300]', () => {
+    const { tfb } = estimateTfbForBien({
+      surfaceUserM2: 50,
+      tfbMoyenParLogementCommune: 300,
+      nbPiecesMoyCommune: 3.5,
+    });
+    expect(tfb).not.toBeNull();
+    expect(tfb!).toBeGreaterThanOrEqual(150);
+    expect(tfb!).toBeLessThanOrEqual(300);
+  });
+});
+
+describe('estimateTfbForBien — proportionnalité surface', () => {
+  it('doubler la surface double la TFB estimée', () => {
+    const base = { tfbMoyenParLogementCommune: 1000, nbPiecesMoyCommune: 3.0 };
+    const r50 = estimateTfbForBien({ surfaceUserM2: 50, ...base });
+    const r100 = estimateTfbForBien({ surfaceUserM2: 100, ...base });
+    expect(r50.tfb).not.toBeNull();
+    expect(r100.tfb).not.toBeNull();
+    expect(r100.tfb!).toBeCloseTo(r50.tfb! * 2, 5);
+  });
+});
+
+describe('estimateTfbForBien — guards surface <= 0', () => {
+  it('retourne tfb=null si surface <= 0', () => {
+    const { tfb } = estimateTfbForBien({
+      surfaceUserM2: 0,
+      tfbMoyenParLogementCommune: 1000,
+      nbPiecesMoyCommune: 3.0,
+    });
+    expect(tfb).toBeNull();
+  });
+});
+
+describe('estimateTfbForBien — guards nbPiecesMoy <= 0', () => {
+  it('retourne tfb=null si nbPiecesMoyCommune <= 0', () => {
+    const { tfb } = estimateTfbForBien({
+      surfaceUserM2: 50,
+      tfbMoyenParLogementCommune: 1000,
+      nbPiecesMoyCommune: 0,
+    });
+    expect(tfb).toBeNull();
+  });
+});
+
+describe('estimateTfbForBien — guards tfbMoy <= 0', () => {
+  it('retourne tfb=null si tfbMoyenParLogementCommune <= 0', () => {
+    const { tfb } = estimateTfbForBien({
+      surfaceUserM2: 50,
+      tfbMoyenParLogementCommune: 0,
+      nbPiecesMoyCommune: 3.0,
+    });
+    expect(tfb).toBeNull();
+  });
+});
+
+describe('estimateTfbForBien — guards NaN/Infinity', () => {
+  it('retourne tfb=null si surfaceUserM2 = NaN', () => {
+    const { tfb } = estimateTfbForBien({
+      surfaceUserM2: NaN,
+      tfbMoyenParLogementCommune: 1000,
+      nbPiecesMoyCommune: 3.0,
+    });
+    expect(tfb).toBeNull();
+  });
+
+  it('retourne tfb=null si nbPiecesMoyCommune = Infinity', () => {
+    const { tfb } = estimateTfbForBien({
+      surfaceUserM2: 50,
+      tfbMoyenParLogementCommune: 1000,
+      nbPiecesMoyCommune: Infinity,
+    });
+    expect(tfb).toBeNull();
   });
 });

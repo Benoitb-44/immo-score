@@ -475,6 +475,31 @@ model LoyerCommune {
 }
 
 // ─────────────────────────────────────────────
+// Table 17 : insee_rp_logement (v4-RP)
+// Recensement Population 2022 — parc logement par commune
+// Source : base-cc-logement-2022 (INSEE, pub. 13/05/2026)
+// Probe : scripts/probes/insee-rp-logement-probe.md
+// Mapping clé : CODGEO → code_commune, P22_LOG, P22_RP, P22_NBPI_RP, P22_RP_PROP
+// nb_pieces_moy = P22_NBPI_RP / P22_RP (calculé à l'ingestion, guard P22_RP=0)
+// ─────────────────────────────────────────────
+
+model InseeRpLogement {
+  id                         Int      @id @default(autoincrement())
+  codeCommune                String   @unique @map("code_commune")
+  nbLogementsTotal           Float    @map("nb_logements_total")
+  nbResidencesPrincipales    Float    @map("nb_residences_principales")
+  nbPiecesTotalRp            Float    @map("nb_pieces_total_rp")
+  nbPiecesMoy                Float    @map("nb_pieces_moy")
+  nbPropOccupants            Float?   @map("nb_prop_occupants")
+  millesime                  String
+  source                     String   @default("INSEE-RP")
+  createdAt                  DateTime @default(now()) @map("created_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
+
+  @@map("insee_rp_logement")
+}
+
+// ─────────────────────────────────────────────
 // Table 16 : taxe_fonciere_communes (v4-TF)
 // Taxe Foncière Bâtie par commune — OFGL REI 2024
 // Source : data.ofgl.fr — Licence Ouverte Etalab v2.0
