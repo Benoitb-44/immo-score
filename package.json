@@ -22,7 +22,8 @@
     "compute:scores": "tsx src/scripts/compute-scores.ts",
     "test:scoring": "tsx src/scripts/test-scoring.ts",
     "test:scoring-v2": "tsx src/scripts/test-scoring-v2.ts",
-    "test:accessibilite": "tsx src/scripts/test-accessibilite.ts"
+    "test:accessibilite": "tsx src/scripts/test-accessibilite.ts",
+    "test:revalidate": "npx tsx src/app/api/revalidate/__tests__/route.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

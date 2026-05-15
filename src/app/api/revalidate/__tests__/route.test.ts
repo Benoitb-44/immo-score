@@ -1,9 +1,22 @@
 /**
+ * LIMITATION: This file tests an inlined copy of the auth logic, not the
+ * actual route.ts module. ESM/tsx cycle prevents direct import under
+ * node --test (test runner cannot resolve the route.ts module at runtime).
+ *
+ * If you change the auth logic in route.ts, update handleRevalidate here too.
+ *
+ * Refactor path: when the test runner is upgraded to support ESM dynamic
+ * import for App Router routes (or migrated to Vitest), this file should
+ * import { GET } from '../route' directly and remove the inlined copy.
+ *
+ * Tracked in: SEC-AUDIT-ENV-VAR-AUTH-PATTERNS (broader test infra refactor)
+ */
+
+/**
  * Auth guard tests for /api/revalidate — fail-closed behavior.
- * Run with: npx tsx src/app/api/revalidate/__tests__/route.test.ts
+ * Run with: npm run test:revalidate
  *
  * Plain assertion script (no test framework required).
- * Mirrors the auth logic from route.ts exactly — update both if logic changes.
  */
 import assert from 'node:assert/strict';
 
