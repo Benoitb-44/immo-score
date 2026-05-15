@@ -28,6 +28,15 @@ jobs:
             docker stop $(docker ps -q --filter "publish=3001") 2>/dev/null || true
             docker compose up -d
             docker image prune -f
+            echo "⏳ Attente PostgreSQL ready..."
+            sleep 5
+            echo "⏳ Application des migrations Prisma..."
+            docker exec cityrank npx prisma migrate deploy
+            if [ $? -ne 0 ]; then
+              echo "❌ Migration Prisma failed"
+              exit 1
+            fi
+            echo "✅ Migrations appliquées"
             echo "⏳ Healthcheck post-deploy..."
             sleep 45
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001)
