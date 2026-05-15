@@ -6,14 +6,25 @@ import { NextRequest, NextResponse } from 'next/server';
  * On-demand ISR invalidation. Protégée par REVALIDATE_SECRET.
  */
 export async function GET(request: NextRequest) {
+  const expectedSecret = process.env.REVALIDATE_SECRET;
   const { searchParams } = request.nextUrl;
-  const secret = searchParams.get('secret');
-  const path = searchParams.get('path');
+  const providedSecret = searchParams.get('secret');
 
-  if (secret !== process.env.REVALIDATE_SECRET) {
+  // Fail-closed: refuse all requests when the env var is not configured server-side.
+  // Prevents the undefined === undefined bypass.
+  if (!expectedSecret) {
+    console.error('[revalidate] REVALIDATE_SECRET env var is not set — refusing all requests');
+    return NextResponse.json(
+      { message: 'Server misconfigured' },
+      { status: 500 }
+    );
+  }
+
+  if (!providedSecret || providedSecret !== expectedSecret) {
     return NextResponse.json({ message: 'Invalid token' }, { status: 401 });
   }
 
+  const path = searchParams.get('path');
   if (!path) {
     return NextResponse.json({ message: 'Missing path' }, { status: 400 });
   }

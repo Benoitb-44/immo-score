@@ -33,6 +33,7 @@
     "test:scoring": "tsx src/scripts/test-scoring.ts",
     "test:scoring-v2": "tsx src/scripts/test-scoring-v2.ts",
     "test:accessibilite": "tsx src/scripts/test-accessibilite.ts",
+    "test:revalidate": "npx tsx src/app/api/revalidate/__tests__/route.test.ts",
     "test:taxe-fonciere": "tsx src/scripts/test-taxe-fonciere.ts",
     "test:calc": "vitest run --coverage src/lib/__tests__/financial-calc.test.ts",
     "probe:loyers": "tsx scripts/probe-xlsx.ts --url=https://www.data.gouv.fr/api/1/datasets/r/34434cef-2f85-43b9-a601-c625ee426cb7 --name=\"Carte Loyers 2023 (ANIL/Cerema)\" --output=docs/probes/probe-cartes-loyers-2023.md --download-dir=data/cartes-loyers/current",
