@@ -5,7 +5,7 @@ export const revalidate = 604800; // 7 jours
 export const metadata: Metadata = {
   title: 'Méthodologie du score | CityRank',
   description:
-    'Comment est calculé le score CityRank : 4 dimensions (DVF, BPE, Risques, DPE), sources officielles, limitations transparentes. Version v3.1.',
+    'Comment est calculé le score CityRank : 4 dimensions (DVF, BPE, Risques, DPE) + accessibilité financière v4, sources officielles, limitations transparentes. Versions v3.1 & v4.',
   alternates: {
     canonical: '/methodologie',
   },
@@ -21,7 +21,7 @@ const jsonLd = {
     'Documentation complète de la méthode de calcul du score CityRank : 4 dimensions, sources open data, limitations.',
   author: { '@type': 'Organization', name: 'CityRank' },
   datePublished: '2026-04-19',
-  dateModified: '2026-04-19',
+  dateModified: '2026-05-11',
   url: 'https://cityrank.fr/methodologie',
 };
 
@@ -77,6 +77,7 @@ export default function MethodologiePage() {
                 { href: '#sources', label: 'Sources' },
                 { href: '#limitations', label: 'Limitations' },
                 { href: '#principes', label: 'Principes' },
+                { href: '#v4-accessibilite', label: 'v4 Accessibilité' },
                 { href: '#versions', label: 'Versions' },
               ].map(({ href, label }) => (
                 <a
@@ -194,6 +195,141 @@ export default function MethodologiePage() {
                   <span className="tabular-nums">34 875</span>{' '}
                   <span className="text-ink">(87 %)</span>
                 </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Loyers de référence */}
+          <div id="loyers" className="border-2 border-ink bg-paper mt-6">
+            <div className="border-b-2 border-ink px-5 py-3 bg-ink">
+              <p className="font-mono text-xs text-paper tracking-widest uppercase">
+                Loyers de référence — Couverture territoriale
+              </p>
+            </div>
+            <div className="divide-y-2 divide-ink">
+              <div className="px-5 py-5">
+                <p className="font-sans text-sm text-ink leading-relaxed mb-4">
+                  CityRank utilise quatre sources publiques pour couvrir l&apos;intégralité du territoire
+                  métropolitain. Chaque source est sélectionnée selon une{' '}
+                  <strong className="text-ink">hiérarchie de précision</strong> : plus la source est
+                  locale et exhaustive, plus elle prévaut.
+                </p>
+                <p className="font-mono text-xs tracking-widest uppercase text-ink-muted mb-3">
+                  Cartographie des sources
+                </p>
+                <div className="border-2 border-ink overflow-x-auto">
+                  <div className="grid grid-cols-[2fr_2fr_1fr_1fr_1fr] border-b-2 border-ink divide-x-2 divide-ink bg-ink min-w-[640px]">
+                    {['Source', 'Périmètre', 'Communes', 'Millésime', 'Granularité'].map((h) => (
+                      <div key={h} className="px-4 py-2">
+                        <p className="font-mono text-[10px] text-paper tracking-widest uppercase">{h}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {[
+                    { source: 'ANIL/Cerema Carte Loyers', perimetre: 'France hors métropoles 3M', communes: '~34 800', millesime: '2023', granularite: 'Commune' },
+                    { source: 'OLAP (Paris)', perimetre: '75056 — Paris', communes: '1', millesime: '2024', granularite: 'Commune' },
+                    { source: 'OLL Lyon', perimetre: '69123 — Lyon', communes: '1', millesime: '2024', granularite: 'Commune' },
+                    { source: 'OLL AMP (Marseille)', perimetre: '13055 — Marseille', communes: '1', millesime: '2024', granularite: 'Commune' },
+                  ].map((row, i) => (
+                    <div
+                      key={row.source}
+                      className={`grid grid-cols-[2fr_2fr_1fr_1fr_1fr] divide-x-2 divide-ink min-w-[640px] ${i < 3 ? 'border-b-2 border-ink' : ''}`}
+                    >
+                      <div className="px-4 py-3">
+                        <p className="font-display font-semibold text-ink text-sm">{row.source}</p>
+                      </div>
+                      <div className="px-4 py-3">
+                        <p className="font-sans text-xs text-ink-muted">{row.perimetre}</p>
+                      </div>
+                      <div className="px-4 py-3">
+                        <p className="font-mono text-sm tabular-nums text-ink">{row.communes}</p>
+                      </div>
+                      <div className="px-4 py-3">
+                        <p className="font-mono text-sm tabular-nums text-ink">{row.millesime}</p>
+                      </div>
+                      <div className="px-4 py-3">
+                        <p className="font-sans text-xs text-ink-muted">{row.granularite}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="px-5 py-5">
+                <p className="font-mono text-xs tracking-widest uppercase text-ink-muted mb-2">
+                  Pourquoi cette hiérarchie
+                </p>
+                <p className="font-sans text-sm text-ink leading-relaxed mb-3">
+                  La Carte Loyers ANIL/Cerema est la source nationale de référence, publiée par le
+                  ministère du Logement. Elle ne couvre cependant pas Paris, Lyon et Marseille — ces
+                  trois métropoles disposent de leur observatoire local des loyers (OLL), dispositif
+                  agréé par l&apos;État qui produit des statistiques plus précises grâce à des collectes
+                  locales massives.
+                </p>
+                <p className="font-sans text-sm text-ink-muted leading-relaxed">
+                  Quand une commune est couverte simultanément par ANIL et un OLL, CityRank
+                  privilégie systématiquement la donnée OLL — variance locale plus fine, volumes
+                  d&apos;observations supérieurs, quartiles disponibles.
+                </p>
+              </div>
+              <div className="px-5 py-5">
+                <p className="font-mono text-xs tracking-widest uppercase text-ink-muted mb-2">
+                  Transparence des données affichées
+                </p>
+                <p className="font-sans text-sm text-ink leading-relaxed mb-3">
+                  Chaque page commune affiche le loyer médian (€/m² CC) tel qu&apos;il provient de la
+                  source primaire de cette commune. Lorsque la source est un OLL, deux informations
+                  supplémentaires sont disponibles :
+                </p>
+                <ul className="space-y-1 mb-3">
+                  {[
+                    { label: 'Quartiles Q1 / Q3', desc: 'intervalle interquartile (50 % des loyers observés)' },
+                    { label: "Nombre d'observations", desc: 'volume de la collecte locale (gage de robustesse)' },
+                  ].map((item) => (
+                    <li key={item.label} className="flex items-start gap-2">
+                      <span className="font-mono text-xs text-ink-muted mt-0.5 shrink-0">—</span>
+                      <p className="font-sans text-sm text-ink-muted leading-relaxed">
+                        <strong className="text-ink">{item.label}</strong> : {item.desc}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+                <p className="font-sans text-sm text-ink-muted leading-relaxed">
+                  La Carte Loyers ANIL ne publie que le loyer médian, sans quartiles ni volumétrie
+                  communaux — CityRank affiche alors uniquement le médian.
+                </p>
+              </div>
+              <div className="px-5 py-5">
+                <p className="font-mono text-xs tracking-widest uppercase text-ink-muted mb-2">
+                  Méthodologie d&apos;ingestion
+                </p>
+                <p className="font-sans text-sm text-ink-muted leading-relaxed">
+                  Aucun filtre époque de construction n&apos;est appliqué à l&apos;ingestion : CityRank lit les
+                  loyers toutes époques confondues pour rester représentatif du parc locatif réel
+                  d&apos;une commune, y compris l&apos;haussmannien et l&apos;ancien.
+                </p>
+              </div>
+              <div className="divide-y-2 divide-ink">
+                {[
+                  { label: 'ANIL/Cerema — data.gouv.fr · Carte des loyers 2023', href: 'https://www.data.gouv.fr/datasets/carte-des-loyers-indicateurs-de-loyers-d-annonce-par-commune-en-2023/' },
+                  { label: 'OLAP (Paris) — observatoire-des-loyers.fr', href: 'https://www.observatoire-des-loyers.fr/' },
+                  { label: 'OLL Lyon — observatoire-loyers-lyon.org', href: 'https://www.observatoire-loyers-lyon.org/' },
+                  { label: 'OLL AMP (Marseille) — urcaue-paca.com', href: 'https://www.urcaue-paca.com/oll-aix-marseille-provence' },
+                ].map((src) => (
+                  <a
+                    key={src.href}
+                    href={src.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between px-5 py-4 hover:bg-paper-soft transition-colors group"
+                  >
+                    <p className="font-mono text-sm font-bold text-ink group-hover:text-accent transition-colors">
+                      {src.label}
+                    </p>
+                    <span className="font-mono text-xs text-ink-muted group-hover:text-accent transition-colors shrink-0 ml-4">
+                      ↗
+                    </span>
+                  </a>
+                ))}
               </div>
             </div>
           </div>
@@ -514,10 +650,16 @@ export default function MethodologiePage() {
           <div className="border-2 border-ink bg-paper divide-y-2 divide-ink">
             {[
               {
+                version: 'v4-A',
+                date: '30 avril 2026',
+                current: true,
+                desc: 'Sprint 4-A : sous-score accessibilité financière (Median Multiple UC). Paliers data-driven Cerema 2022-2024. Hiérarchie 4 niveaux N1→N4. Coexiste avec v3.1 pendant la transition.',
+              },
+              {
                 version: 'v3.1',
                 date: '19 avril 2026',
-                current: true,
-                desc: 'Version actuelle. Intégration de la BPE INSEE, refonte du score DVF en gaussienne centrée médiane, imputation régionale pour Alsace-Moselle et DROM, garde-fous liquidité.',
+                current: false,
+                desc: 'Intégration de la BPE INSEE, refonte du score DVF en gaussienne centrée médiane, imputation régionale pour Alsace-Moselle et DROM, garde-fous liquidité.',
               },
               {
                 version: 'v2',
@@ -548,6 +690,150 @@ export default function MethodologiePage() {
               </div>
             ))}
           </div>
+        </section>
+
+        {/* ── v4 : Accessibilité financière ── */}
+        <section>
+          <SectionTitle index="06" id="v4-accessibilite" title="Score v4 — Accessibilité financière (Sprint 4-A)" />
+
+          <p className="font-sans text-sm text-ink-muted leading-relaxed mb-6 max-w-3xl">
+            Nouveau sous-score introduit en Sprint 4-A (30 avril 2026). Il mesure la capacité d&apos;un
+            ménage médian à acheter un logement médian dans la commune, exprimée en{' '}
+            <strong className="text-ink">années de revenu disponible par unité de consommation</strong>{' '}
+            (Median Multiple UC). Plus le score est élevé, plus l&apos;achat est accessible.
+          </p>
+
+          {/* Unité et formule */}
+          <div className="border-2 border-ink bg-paper mt-4">
+            <div className="border-b-2 border-ink px-5 py-3 bg-ink">
+              <p className="font-mono text-xs text-paper tracking-widest uppercase">
+                Formule — Median Multiple UC
+              </p>
+            </div>
+            <div className="divide-y-2 divide-ink">
+              <div className="px-5 py-5">
+                <div className="border-2 border-ink bg-paper-soft px-4 py-3 inline-block mb-4">
+                  <p className="font-mono text-xs text-ink-muted mb-1">Définition</p>
+                  <p className="font-mono text-sm text-ink">
+                    MM = prix_médian_commune / revenu_disponible_UC_médian
+                  </p>
+                </div>
+                <p className="font-sans text-sm text-ink-muted leading-relaxed">
+                  Un MM de 4 signifie qu&apos;un ménage médian doit consacrer 4 années de revenu pour
+                  acquérir un logement médian. Seuil international d&apos;accessibilité : 3 à 4 ans.
+                </p>
+              </div>
+
+              {/* Paliers */}
+              <div className="px-5 py-5">
+                <p className="font-mono text-xs tracking-widest uppercase text-ink-muted mb-3">
+                  Barème de conversion MM → score (paliers data-driven Cerema 2022-2024)
+                </p>
+                <div className="border-2 border-ink overflow-x-auto">
+                  <div className="grid grid-cols-[1fr_1fr_2fr] border-b-2 border-ink divide-x-2 divide-ink bg-ink min-w-[380px]">
+                    {['Median Multiple', 'Score', 'Interprétation'].map((h) => (
+                      <div key={h} className="px-4 py-2">
+                        <p className="font-mono text-[10px] text-paper tracking-widest uppercase">{h}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {[
+                    { mm: '< 3,44', score: '90–95', interp: 'Très accessible (P10 Cerema)', color: 'text-score-high' },
+                    { mm: '3,44', score: '90', interp: 'Accessible (P10)', color: 'text-score-high' },
+                    { mm: '4,64', score: '75', interp: 'Plutôt accessible (P25)', color: 'text-score-high' },
+                    { mm: '6,46', score: '55', interp: 'Médiane nationale (P50)', color: 'text-score-mid' },
+                    { mm: '8,34', score: '30', interp: 'Tendu (P75)', color: 'text-score-mid' },
+                    { mm: '≥ 10,57', score: '10', interp: 'Très tendu (P90) — plancher strict', color: 'text-score-low' },
+                  ].map((row, i) => (
+                    <div
+                      key={row.mm}
+                      className={`grid grid-cols-[1fr_1fr_2fr] divide-x-2 divide-ink min-w-[380px] ${i < 5 ? 'border-b-2 border-ink' : ''}`}
+                    >
+                      <div className="px-4 py-3">
+                        <p className="font-mono text-sm tabular-nums text-ink">{row.mm}</p>
+                      </div>
+                      <div className="px-4 py-3">
+                        <p className={`font-display text-xl font-bold tabular-nums ${row.color}`}>{row.score}</p>
+                      </div>
+                      <div className="px-4 py-3">
+                        <p className="font-sans text-xs text-ink-muted">{row.interp}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="font-mono text-xs text-ink-muted mt-3">
+                  Calibrage data-driven sur 3 305 communes Cerema 2022-2024 · min=1,32 · max=31,29 · moyenne=6,77 · σ=2,96
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Hiérarchie de sources */}
+          <div className="border-2 border-ink bg-paper mt-6">
+            <div className="border-b-2 border-ink px-5 py-3 bg-ink">
+              <p className="font-mono text-xs text-paper tracking-widest uppercase">
+                Hiérarchie des sources — 4 niveaux de fallback
+              </p>
+            </div>
+            <div className="divide-y-2 divide-ink">
+              {[
+                {
+                  niveau: 'N1',
+                  titre: 'Cerema DV3F 2022-2024',
+                  imputed: false,
+                  desc: 'Données directes d\'observation de marché du Cerema (DV3F), transactions immobilières 2022-2024 au niveau communal. Meilleure précision disponible.',
+                  badgeClass: 'bg-score-high text-white',
+                },
+                {
+                  niveau: 'N2',
+                  titre: 'DVF Etalab + Filosofi INSEE 2021',
+                  imputed: true,
+                  desc: 'Prix DVF médian sur 3 ans croisé avec le revenu disponible médian par UC du Filosofi INSEE 2021. Bonne précision sur les communes actives DVF.',
+                  badgeClass: 'bg-score-mid text-white',
+                },
+                {
+                  niveau: 'N3',
+                  titre: 'Médiane départementale',
+                  imputed: true,
+                  desc: 'Médiane du Median Multiple sur les communes N1+N2 du même département. Utilisé lorsque ni DVF ni Cerema ne couvrent la commune. Indicatif.',
+                  badgeClass: 'bg-orange-500 text-white',
+                },
+                {
+                  niveau: 'N4',
+                  titre: 'Médiane nationale',
+                  imputed: true,
+                  desc: 'Fallback ultime — médiane nationale du Median Multiple. Score = 55 (médiane). Peu représentatif localement. Affiché explicitement sur la fiche commune.',
+                  badgeClass: 'bg-score-low text-white',
+                },
+              ].map((row) => (
+                <div key={row.niveau} className="flex items-start gap-4 px-5 py-4">
+                  <span className={`font-mono text-xs font-bold px-2 py-0.5 shrink-0 mt-0.5 ${row.badgeClass}`}>
+                    {row.niveau}
+                  </span>
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="font-display font-semibold text-ink text-sm">{row.titre}</p>
+                      {row.imputed && (
+                        <span className="font-mono text-[10px] border border-ink-muted px-1 py-0.5 text-ink-muted">
+                          imputé
+                        </span>
+                      )}
+                    </div>
+                    <p className="font-sans text-sm text-ink-muted leading-relaxed">{row.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <InfoNote>
+            <span className="font-mono font-bold text-ink text-xs tracking-widest uppercase mr-2">
+              Transparence
+            </span>
+            Le niveau de fallback (N1–N4) est affiché en badge sur chaque fiche commune. Un score N3 ou N4
+            doit être interprété avec prudence — il reflète l&apos;ordre de grandeur départemental ou national,
+            pas nécessairement la réalité locale.
+          </InfoNote>
         </section>
 
         {/* ── Contact ── */}

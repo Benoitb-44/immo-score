@@ -24,6 +24,10 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - NODE_ENV=production
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - ./data/cerema:/app/data/cerema:ro
     depends_on:
       db:
         condition: service_healthy

@@ -6,10 +6,16 @@
  * generateMetadata     : titre + description dynamiques pour le SEO.
  */
 
-import { PrismaClient, NiveauRisque, type BpeCommune } from '@prisma/client';
+import { PrismaClient, NiveauRisque, type BpeCommune, type Prisma } from '@prisma/client';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { BPE_CODES } from '@/lib/bpe-codes';
+import SousScoreV4, { type NiveauFallback } from '@/components/SousScoreV4';
+import RentalCalculator from '@/components/RentalCalculator';
+import { getLoyerForCommune } from '@/lib/repositories/loyer.repository';
+import { getTaxeFonciereForCommune } from '@/lib/repositories/taxe-fonciere.repository';
+import { getRpLogementForCommune } from '@/lib/repositories/rp-logement';
+import { DEFAULT_SURFACE } from '@/lib/constants/market-rates';
 
 export const revalidate = 86400; // ISR 24h
 
@@ -140,14 +146,14 @@ export default async function CommunePage({
 }) {
   const commune = await prisma.commune.findUnique({
     where: { slug: params.slug },
-    include: { score: true, bpe: true },
+    include: { score: true, bpe: true, score_commune: true },
   });
 
   if (!commune) notFound();
 
   const currentGlobalScore = commune.score?.score_global ?? null;
 
-  const [dvfRows, dpeRows, risquesList, sameDeptCommunes, similarScoreCommunes] = await Promise.all([
+  const [dvfRows, dpeRows, risquesList, sameDeptCommunes, similarScoreCommunes, loyer, taxeFonciere, filosofiData, rpLogement] = await Promise.all([
     prisma.$queryRaw<{ prix_m2_median: string | null; tx_per_hab: string | null }[]>`
       SELECT
         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY d.prix_m2)::text AS prix_m2_median,
@@ -191,6 +197,16 @@ export default async function CommunePage({
           LIMIT 4
         `
       : Promise.resolve([] as NavCommune[]),
+    getLoyerForCommune(commune.code_insee, prisma),
+    getTaxeFonciereForCommune(commune.code_insee, prisma),
+    // Filosofi : nb_logements + surface_moy via raw SQL (colonnes hors schéma Prisma si disponibles)
+    prisma.$queryRaw<{ nb_logements: number | null; surface_moy: number | null }[]>`
+      SELECT nb_logements, surface_moy
+      FROM immo_score.insee_filosofi
+      WHERE code_commune = ${commune.code_insee}
+      LIMIT 1
+    `.catch(() => [] as { nb_logements: number | null; surface_moy: number | null }[]),
+    getRpLogementForCommune(commune.code_insee, prisma).catch(() => null),
   ]);
 
   const prixM2Median = dvfRows[0]?.prix_m2_median
@@ -205,9 +221,38 @@ export default async function CommunePage({
 
   const score = commune.score;
   const globalScore = score?.score_global ?? null;
+
+  // ── Données calculateur investisseur ─────────────────────────────────────────
+  const filosofiRow = Array.isArray(filosofiData) ? filosofiData[0] ?? null : null;
+  const nbLogementsFilosofi = filosofiRow?.nb_logements ?? null;
+  const surfaceMoyFilosofi = filosofiRow?.surface_moy ?? null;
+
+  // ── Score v4 — Accessibilité financière ──────────────────────────────────────
+  const scoreCommune = commune.score_commune;
+  const scoreAccessFin = scoreCommune?.score_accessibilite_fin ?? null;
+
+  function deriveNiveauFallback(sc: typeof scoreCommune): NiveauFallback | null {
+    if (!sc) return null;
+    const methods = sc.imputation_methods as Prisma.JsonObject | null;
+    const method = typeof methods?.method === 'string' ? methods.method : null;
+    if (method === 'cerema_aav_d5_2022_2024') return 'N1';
+    if (method === 'dvf_filosofi') return 'N2';
+    if (method === 'regional_median') return 'N3';
+    if (method === 'national_median') return 'N4';
+    // Si pas d'imputation enregistrée et non imputé → N1
+    return sc.accessibilite_imputed ? 'N3' : 'N1';
+  }
+
+  const niveauAccessFin = deriveNiveauFallback(scoreCommune);
   const globalRounded = globalScore != null ? Math.round(globalScore) : null;
   const color =
     globalRounded != null ? scoreColor(globalRounded) : { bg: 'bg-ink-muted', text: 'text-white' };
+
+  // Yield brut indicatif pour JSON-LD (uniquement si loyer N1/N1bis et DVF disponible)
+  const loyerPourJsonLd = loyer?.niveau != null && ['N1', 'N1bis'].includes(loyer.niveau) ? loyer : null;
+  const yieldBrutJsonLd = loyerPourJsonLd && prixM2Median
+    ? Math.round(((loyerPourJsonLd.loyer_m2 * DEFAULT_SURFACE * 12) / (prixM2Median * DEFAULT_SURFACE)) * 1000) / 10
+    : null;
 
   const jsonLd = {
     '@context': 'https://schema.org',
@@ -230,6 +275,14 @@ export default async function CommunePage({
         minValue: 0,
         maxValue: 100,
       },
+      ...(yieldBrutJsonLd != null ? [{
+        '@type': 'PropertyValue',
+        name: 'Rendement locatif brut indicatif',
+        value: yieldBrutJsonLd,
+        unitCode: 'P1',
+        unitText: '%',
+        description: `Loyer médian observé (${loyerPourJsonLd?.source}) rapporté au prix DVF médian — surface ${DEFAULT_SURFACE} m²`,
+      }] : []),
     ],
   };
 
@@ -352,6 +405,45 @@ export default async function CommunePage({
             <span className="inline-block w-3 h-3 bg-score-low border border-ink" />
             0–39 — Faible
           </span>
+        </div>
+
+        {/* ── Score CityRank v4 — Accessibilité financière ── */}
+        <div className="mt-12">
+          <SectionTitle index="02" title="Score CityRank v4 — Accessibilité financière" />
+
+          <SousScoreV4
+            titre="Accessibilité financière"
+            valeur={scoreAccessFin}
+            niveau={niveauAccessFin}
+            source="Cerema DV3F 2022-2024 · DVF + Filosofi"
+            lienMethodo="/methodologie#v4-accessibilite"
+          />
+
+          <p className="font-mono text-[10px] text-ink-muted mt-3 leading-relaxed">
+            Score v4 en déploiement progressif — coexiste avec le score v3.1 ci-dessus pendant la transition.{' '}
+            <a href="/methodologie#v4-accessibilite" className="underline hover:text-ink">
+              Voir la méthode complète
+            </a>.
+          </p>
+        </div>
+
+        {/* ── Calculateur d'investissement locatif (UX-v4-CALC) ── */}
+        <div className="mt-12">
+          <SectionTitle index="03" title="Simulateur investisseur locatif" />
+          <RentalCalculator
+            commune={{
+              code_insee: commune.code_insee,
+              nom: commune.nom,
+              departement: commune.departement,
+              population: commune.population ?? null,
+            }}
+            loyer={loyer}
+            taxeFonciere={taxeFonciere}
+            prixM2Dvf={prixM2Median}
+            surfaceMoyFilosofi={surfaceMoyFilosofi}
+            nbLogementsFilosofi={nbLogementsFilosofi}
+            rpLogement={rpLogement}
+          />
         </div>
 
         {/* ── Navigation — même département ── */}

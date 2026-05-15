@@ -34,11 +34,16 @@ import { readFileSync, existsSync } from 'fs';
 
 const prisma = new PrismaClient();
 
-// Sources par ordre de priorité (ZIP détecté automatiquement par magic bytes)
-// Fichier cible dans le ZIP : DS_FILOSOFI_CC_data.csv (format long, séparateur ;)
+// Millésime cible : 2021 (dernier disponible — Filosofi 2022 annulé par INSEE,
+// suppression taxe d'habitation → impossible de chaîner ménages fiscaux ↔ logements).
+// NE PAS changer pour "dernière version disponible" : 2021 est l'ancrage cohérent
+// avec la fenêtre DVF 2022-2024 et les données Cerema.
+const FILOSOFI_ANNEE = 2021;
+
 const DOWNLOAD_SOURCES = [
   {
     label: 'INSEE Filosofi 2021 (source officielle)',
+    // URL stable INSEE — ne pas substituer par un lien "dernière version"
     url: 'https://www.insee.fr/fr/statistiques/fichier/7756729/base-cc-filosofi-2021-geo2025_csv.zip',
   },
 ];
@@ -179,8 +184,10 @@ async function extractCsvFromZip(buf: Buffer): Promise<Readable> {
 // ─── Parsing CSV Filosofi ─────────────────────────────────────────────────────
 
 interface FilosofiRow {
-  code_commune: string;
+  code_commune:  string;
   revenu_median: number;
+  taux_pauvrete: number | null;  // TP60_SL (%)
+  population:    number | null;  // NBPERS
 }
 
 async function parseCsv(stream: Readable): Promise<FilosofiRow[]> {
@@ -202,6 +209,9 @@ async function parseCsv(stream: Readable): Promise<FilosofiRow[]> {
   let measureIdx = -1;
   let valueIdx   = -1;
   let isLongFormat = false;
+
+  // Buffer pour les mesures par commune (format long : plusieurs lignes par commune)
+  const communeData = new Map<string, { med_sl?: number; tp60_sl?: number; nbpers?: number }>();
 
   for await (const line of rl) {
     lineCount++;
@@ -237,9 +247,10 @@ async function parseCsv(stream: Readable): Promise<FilosofiRow[]> {
     const cols = line.split(sep).map(c => c.trim().replace(/^"|"$/g, ''));
 
     if (isLongFormat) {
-      // Format long 2021+ : ne garder que les lignes MED_SL (niveau de vie médian)
+      // Format long 2021+ : accumuler MED_SL + TP60_SL + NBPERS par commune
       if (cols.length <= Math.max(geoIdx, measureIdx, valueIdx)) continue;
-      if (cols[measureIdx] !== 'MED_SL') continue;
+      const measure = cols[measureIdx];
+      if (!['MED_SL', 'TP60_SL', 'NBPERS'].includes(measure)) continue;
 
       const geo   = cols[geoIdx];
       const value = cols[valueIdx];
@@ -248,10 +259,14 @@ async function parseCsv(stream: Readable): Promise<FilosofiRow[]> {
       if (FILTER_DEPT && !geo.startsWith(FILTER_DEPT)) continue;
 
       if (!value || value === 's' || value === 'nd' || value === 'ns') { secrets++; continue; }
-      const revenu = parseFloat(value.replace(',', '.'));
-      if (isNaN(revenu) || revenu <= 0) { secrets++; continue; }
+      const num = parseFloat(value.replace(',', '.'));
+      if (isNaN(num) || num < 0) { secrets++; continue; }
 
-      rows.push({ code_commune: geo, revenu_median: revenu });
+      const entry = communeData.get(geo) ?? {};
+      if (measure === 'MED_SL')  entry.med_sl  = num;
+      if (measure === 'TP60_SL') entry.tp60_sl = num;
+      if (measure === 'NBPERS')  entry.nbpers  = Math.round(num);
+      communeData.set(geo, entry);
     } else {
       // Format large 2020
       if (cols.length <= Math.max(codgeoIdx, med20Idx)) continue;
@@ -266,7 +281,20 @@ async function parseCsv(stream: Readable): Promise<FilosofiRow[]> {
       const revenu = parseFloat(med20.replace(',', '.'));
       if (isNaN(revenu) || revenu <= 0) { secrets++; continue; }
 
-      rows.push({ code_commune: codgeo, revenu_median: revenu });
+      rows.push({ code_commune: codgeo, revenu_median: revenu, taux_pauvrete: null, population: null });
+    }
+  }
+
+  // Format long : consolider les mesures par commune en lignes
+  if (isLongFormat) {
+    for (const [geo, data] of communeData) {
+      if (!data.med_sl || data.med_sl <= 0) continue;
+      rows.push({
+        code_commune:  geo,
+        revenu_median: data.med_sl,
+        taux_pauvrete: data.tp60_sl ?? null,
+        population:    data.nbpers ?? null,
+      });
     }
   }
 
@@ -283,18 +311,45 @@ async function upsertBatch(rows: FilosofiRow[]): Promise<{ inserted: number; err
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
     try {
+      // Table insee_filosofi — compatibilité v3
       await prisma.$executeRaw`
         INSERT INTO immo_score.insee_filosofi (code_commune, revenu_median, annee, created_at)
         SELECT * FROM UNNEST(
           ${batch.map(r => r.code_commune)}::text[],
           ${batch.map(r => r.revenu_median)}::float8[],
-          ${batch.map(() => 2021)}::int[],
+          ${batch.map(() => FILOSOFI_ANNEE)}::int[],
           ${batch.map(() => new Date())}::timestamptz[]
         ) AS t(code_commune, revenu_median, annee, created_at)
         ON CONFLICT (code_commune) DO UPDATE
           SET revenu_median = EXCLUDED.revenu_median,
               annee         = EXCLUDED.annee
       `;
+
+      // Table filosofi_communes — v4 (avec taux_pauvrete + population)
+      await prisma.$executeRaw`
+        INSERT INTO immo_score.filosofi_communes
+          (id, commune_id, median_uc, taux_pauvrete, population, annee, updated_at)
+        SELECT
+          gen_random_uuid()::text,
+          t.commune_id, t.median_uc, t.taux_pauvrete, t.population,
+          ${FILOSOFI_ANNEE}::int, NOW()
+        FROM UNNEST(
+          ${batch.map(r => r.code_commune)}::text[],
+          ${batch.map(r => r.revenu_median)}::float8[],
+          ${batch.map(r => r.taux_pauvrete)}::float8[],
+          ${batch.map(r => r.population)}::int[]
+        ) AS t(commune_id, median_uc, taux_pauvrete, population)
+        WHERE EXISTS (
+          SELECT 1 FROM immo_score.communes c WHERE c.code_insee = t.commune_id
+        )
+        ON CONFLICT (commune_id) DO UPDATE
+          SET median_uc     = EXCLUDED.median_uc,
+              taux_pauvrete = EXCLUDED.taux_pauvrete,
+              population    = EXCLUDED.population,
+              annee         = EXCLUDED.annee,
+              updated_at    = NOW()
+      `;
+
       inserted += batch.length;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -345,20 +400,23 @@ async function main(): Promise<void> {
 
   // Statistiques de couverture
   const totalCommunes = await prisma.commune.count();
-  const covered = await prisma.$queryRaw<[{ cnt: string }]>`
-    SELECT COUNT(*)::text AS cnt FROM immo_score.insee_filosofi
-  `;
-  const coveredCount = parseInt(covered[0].cnt);
+  const [coveredLegacy, coveredV4] = await Promise.all([
+    prisma.$queryRaw<[{ cnt: string }]>`SELECT COUNT(*)::text AS cnt FROM immo_score.insee_filosofi`,
+    prisma.$queryRaw<[{ cnt: string }]>`SELECT COUNT(*)::text AS cnt FROM immo_score.filosofi_communes`,
+  ]);
+  const coveredCount = parseInt(coveredLegacy[0].cnt);
+  const coveredV4Count = parseInt(coveredV4[0].cnt);
   const pct = totalCommunes > 0 ? ((coveredCount / totalCommunes) * 100).toFixed(1) : '0';
 
   const duration = ((Date.now() - t0) / 1000).toFixed(1);
 
   console.log('\n=== Résultat ===');
-  console.log(`  Communes parsées  : ${rows.length}`);
-  console.log(`  Communes upsertées: ${inserted}`);
-  console.log(`  Erreurs           : ${errors.length}`);
-  console.log(`  Couverture Filosofi : ${coveredCount} / ${totalCommunes} communes (${pct}%)`);
-  console.log(`  Durée             : ${duration}s`);
+  console.log(`  Communes parsées     : ${rows.length}`);
+  console.log(`  Communes upsertées   : ${inserted}`);
+  console.log(`  Erreurs              : ${errors.length}`);
+  console.log(`  Couverture insee_filosofi   : ${coveredCount} / ${totalCommunes} (${pct}%)`);
+  console.log(`  Couverture filosofi_communes: ${coveredV4Count} / ${totalCommunes} communes`);
+  console.log(`  Durée                : ${duration}s`);
 
   if (errors.length > 0) {
     console.error('\n  Erreurs détail :');

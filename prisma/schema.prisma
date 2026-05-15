@@ -30,34 +30,51 @@ enum NiveauRisque {
   TRES_FORT
 }
 
+enum Profile {
+  ACHETEUR
+  INVESTISSEUR
+  FAMILLE
+  RETRAITE
+}
+
 // ─────────────────────────────────────────────
 // Table 1 : communes
 // Référentiel COG INSEE (~35 000 communes)
 // ─────────────────────────────────────────────
 
 model Commune {
-  code_insee  String  @id
+  code_insee  String @id
   nom         String
   departement String
   region      String
   population  Int?
   superficie  Float?
-  slug        String  @unique
+  slug        String @unique
   lat         Float?
   lng         Float?
+
+  // v4 — Accessibilité financière
+  aav_code         String? // Code AAV 2020 (Aires d'Attraction des Villes, INSEE)
+  prix_tx_median3y Float? // Prix médian transaction sur 3 ans glissants (€) — calculé depuis DVF
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
   // Relations
-  dvf_prix    DvfPrix[]
-  dpe         DpeCommune[]
-  equipements Equipement[]
-  bpe         BpeCommune?
-  risques     Risque[]
-  fiscalite   Fiscalite[]
-  demographie Demographie[]
-  score       Score?
+  dvf_prix          DvfPrix[]
+  dpe               DpeCommune[]
+  equipements       Equipement[]
+  bpe               BpeCommune?
+  risques           Risque[]
+  fiscalite         Fiscalite[]
+  demographie       Demographie[]
+  score             Score?
+  filosofi_v2       FilosofiCommune?
+  score_commune     ScoreCommune?
+  score_profiles    ScoreProfile[]
+  fiscalite_commune    FiscaliteCommune?
+  loyer_commune        LoyerCommune?
+  taxe_fonciere        TaxeFonciereCommune?
 
   @@map("communes")
 }
@@ -68,14 +85,14 @@ model Commune {
 // ─────────────────────────────────────────────
 
 model DvfPrix {
-  id                   String   @id @default(cuid())
-  code_commune         String
-  date_mutation        DateTime
-  type_local           String
-  surface_reelle_bati  Float?
-  valeur_fonciere      Float
-  prix_m2              Float?
-  adresse              String?
+  id                  String   @id @default(cuid())
+  code_commune        String
+  date_mutation       DateTime
+  type_local          String
+  surface_reelle_bati Float?
+  valeur_fonciere     Float
+  prix_m2             Float?
+  adresse             String?
 
   updated_at DateTime @updatedAt
 
@@ -92,12 +109,12 @@ model DvfPrix {
 // ─────────────────────────────────────────────
 
 model DpeCommune {
-  id                       String @id @default(cuid())
-  code_commune             String
-  classe_dpe               String // A, B, C, D, E, F, G
-  nb_logements             Int
+  id                        String @id @default(cuid())
+  code_commune              String
+  classe_dpe                String // A, B, C, D, E, F, G
+  nb_logements              Int
   annee_construction_median Int?
-  conso_energie_median     Float?
+  conso_energie_median      Float?
 
   date_ingestion DateTime @default(now())
   updated_at     DateTime @updatedAt
@@ -172,7 +189,7 @@ model BpeCommune {
 // ─────────────────────────────────────────────
 
 model Equipement {
-  id                 String               @id @default(cuid())
+  id                 String              @id @default(cuid())
   code_commune       String
   categorie          EquipementCategorie
   type_equipement    String
@@ -214,12 +231,12 @@ model Risque {
 // ─────────────────────────────────────────────
 
 model Fiscalite {
-  id                    String @id @default(cuid())
-  code_commune          String
-  annee                 Int
-  taux_taxe_fonciere    Float?
-  taux_taxe_habitation  Float?
-  evolution_yoy         Float?
+  id                   String @id @default(cuid())
+  code_commune         String
+  annee                Int
+  taux_taxe_fonciere   Float?
+  taux_taxe_habitation Float?
+  evolution_yoy        Float?
 
   updated_at DateTime @updatedAt
 
@@ -236,14 +253,14 @@ model Fiscalite {
 // ─────────────────────────────────────────────
 
 model Demographie {
-  id               String @id @default(cuid())
-  code_commune     String
-  annee            Int
-  population       Int
+  id                 String @id @default(cuid())
+  code_commune       String
+  annee              Int
+  population         Int
   evolution_5ans_pct Float?
-  age_median       Float?
-  taux_chomage     Float?
-  revenu_median    Float?
+  age_median         Float?
+  taux_chomage       Float?
+  revenu_median      Float?
 
   updated_at DateTime @updatedAt
 
@@ -263,11 +280,105 @@ model Demographie {
 model InseeFilosofi {
   id            Int      @id @default(autoincrement())
   code_commune  String   @unique
-  revenu_median Float    // MED20 : revenu médian par UC en €/an (Filosofi 2020)
+  revenu_median Float // MED20 : revenu médian par UC en €/an (Filosofi 2020)
   annee         Int      @default(2020)
   created_at    DateTime @default(now())
 
   @@map("insee_filosofi")
+}
+
+// ─────────────────────────────────────────────
+// Table 10 : filosofi_communes (v4)
+// Revenus médians par UC + indicateurs complémentaires — Filosofi 2021
+// Remplace insee_filosofi pour les calculs v4 (commune_id FK, champs étendus)
+// ─────────────────────────────────────────────
+
+model FilosofiCommune {
+  id         String @id @default(cuid())
+  commune_id String @unique
+
+  median_uc     Float // MED_SL : revenu médian disponible par UC (€/an)
+  taux_pauvrete Float? // TP60_SL : taux de pauvreté au seuil 60% (%)
+  population    Int? // NBPERS : nb personnes dans les ménages fiscaux
+  annee         Int    @default(2021)
+
+  updated_at DateTime @updatedAt
+
+  commune Commune @relation(fields: [commune_id], references: [code_insee], onDelete: Cascade)
+
+  @@map("filosofi_communes")
+}
+
+// ─────────────────────────────────────────────
+// Table 11 : cerema_accessibilite — Sprint 4-A patch
+// Accessibilité financière par commune (Cerema DV3F 2022-2024).
+// Source niveau 1 : données directes par commune (d5 = médiane = décile 5).
+// commune_id = code INSEE 5 car. (clé unique, FK implicite).
+// ─────────────────────────────────────────────
+
+model CeremaAccessibilite {
+  id         String  @id @default(cuid())
+  commune_id String  @unique // Code INSEE commune 5 car.
+  aav_code   String? // Code AAV 2020 INSEE (null = hors AAV)
+
+  // Déciles en années de revenu UC (d3=D3, d5=médiane, d7=D7)
+  d3_appart Float?
+  d5_appart Float?
+  d7_appart Float?
+  d3_maison Float?
+  d5_maison Float?
+  d7_maison Float?
+
+  annee      Int      @default(2024)
+  source     String   @default("cerema-2022-2024")
+  updated_at DateTime @updatedAt
+
+  @@index([aav_code])
+  @@map("cerema_accessibilite")
+}
+
+// ─────────────────────────────────────────────
+// Table 12 : score_communes (v4)
+// Scores d'accessibilité financière par commune (Sprint 4-A)
+// Architecture v4 : table dédiée par dimension, FK sur code_insee
+// ─────────────────────────────────────────────
+
+model ScoreCommune {
+  id         String @id @default(cuid())
+  commune_id String @unique
+  version    Int    @default(4)
+
+  score_accessibilite_fin Float? // Score accessibilité financière (0-100, floor 10)
+  median_multiple         Float? // Median Multiple calculé ou imputé
+  accessibilite_imputed   Boolean @default(false)
+  imputation_methods      Json? // { method, source, aav_code? }
+
+  computed_at DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  commune Commune @relation(fields: [commune_id], references: [code_insee], onDelete: Cascade)
+
+  @@index([score_accessibilite_fin])
+  @@map("score_communes")
+}
+
+// ─────────────────────────────────────────────
+// Table 13 : score_profiles (v4)
+// Scores globaux par profil acheteur (ACHETEUR, INVESTISSEUR, FAMILLE, RETRAITE)
+// ─────────────────────────────────────────────
+
+model ScoreProfile {
+  id           String   @id @default(cuid())
+  commune_id   String
+  profile      Profile
+  score_global Float
+  updated_at   DateTime @updatedAt
+
+  commune Commune @relation(fields: [commune_id], references: [code_insee], onDelete: Cascade)
+
+  @@unique([commune_id, profile])
+  @@index([commune_id])
+  @@map("score_profiles")
 }
 
 // ─────────────────────────────────────────────
@@ -301,4 +412,122 @@ model Score {
 
   @@index([score_global])
   @@map("scores")
+}
+
+// ─────────────────────────────────────────────
+// Table 14 : fiscalite_communes (v4-TF)
+// Taxe Foncière Bâtie par commune — OFGL REI 2023
+// Source : data.ofgl.fr/explore/dataset/rei/
+// Variables : E11 (base nette), E13 (produit réel), E14 (nb articles)
+// ─────────────────────────────────────────────
+
+model FiscaliteCommune {
+  id         String @id @default(cuid())
+  commune_id String @unique
+
+  tf_base         Float? // E11 : base nette TFB commune (€)
+  tf_produit      Float? // E13 : produit réel TFB commune (€)
+  tf_nb_articles  Int? // E14 : nombre de locaux imposables
+  tf_moy_par_bien Float? // E13/E14 : TF moyenne par logement (€/an)
+  tf_taux_vote    Float? // E12VOTE : taux voté communal (%)
+  annee           Int    @default(2023)
+
+  updated_at DateTime @updatedAt
+
+  commune Commune @relation(fields: [commune_id], references: [code_insee], onDelete: Cascade)
+
+  @@map("fiscalite_communes")
+}
+
+// ─────────────────────────────────────────────
+// Table 15 : loyer_communes (v4-LOY)
+// Loyers médians par commune — Carte Loyers ANIL/Cerema 2023
+// Source : pred-mai-mef-dhup.csv (data.gouv.fr)
+// v4-LOY-3M (R2) : 6 colonnes source tracking ajoutées (DATA-v4-LOY-3M Phase 2 Step 1)
+// ─────────────────────────────────────────────
+
+model LoyerCommune {
+  id         String @id @default(cuid())
+  commune_id String @unique
+
+  loyer_m2         Float? // loypredm2 : loyer médian prédit (€/m²)
+  loyer_m2_ic_low  Float? // lwr.IPm2 : borne inférieure IC 95%
+  loyer_m2_ic_high Float? // upr.IPm2 : borne supérieure IC 95%
+  typpred          String? // "commune" | "maille" — indicateur de confiance
+  nb_obs           Int? // nbobs_com : nb annonces au niveau commune
+  r2_adj           Float? // qualité ajustement modèle (0–1)
+  annee            Int     @default(2023)
+
+  // v4-LOY-3M : hiérarchie de sources N1/N1bis/N2/N3/N4 (R2 — DATA-v4-LOY-3M)
+  niveau    String // 'N1' | 'N1bis' | 'N2' | 'N3' | 'N4'
+  source    String // 'carte_loyers_anil' | 'oll_paris' | 'oll_lyon' | 'oll_amp' | 'dvf_inverse' | 'regional_median' | 'national_median'
+  millesime Int // millésime de la source (ex: 2023)
+  nbObs     Int?     @map("nb_obs_src") // nb observations utilisées pour cette source (niveau commune ou maille)
+  q1M2      Decimal? @db.Decimal(6, 2) @map("q1_m2") // 1er quartile loyer €/m²
+  q3M2      Decimal? @db.Decimal(6, 2) @map("q3_m2") // 3e quartile loyer €/m²
+
+  updated_at DateTime @updatedAt
+
+  commune Commune @relation(fields: [commune_id], references: [code_insee], onDelete: Cascade)
+
+  @@index([niveau, source])
+  @@map("loyer_communes")
+}
+
+// ─────────────────────────────────────────────
+// Table 17 : insee_rp_logement (v4-RP)
+// Recensement Population 2022 — parc logement par commune
+// Source : base-cc-logement-2022 (INSEE, pub. 13/05/2026)
+// Probe : scripts/probes/insee-rp-logement-probe.md
+// Mapping clé : CODGEO → code_commune, P22_LOG, P22_RP, P22_NBPI_RP, P22_RP_PROP
+// nb_pieces_moy = P22_NBPI_RP / P22_RP (calculé à l'ingestion, guard P22_RP=0)
+// ─────────────────────────────────────────────
+
+model InseeRpLogement {
+  id                         Int      @id @default(autoincrement())
+  codeCommune                String   @unique @map("code_commune")
+  nbLogementsTotal           Float    @map("nb_logements_total")
+  nbResidencesPrincipales    Float    @map("nb_residences_principales")
+  nbPiecesTotalRp            Float    @map("nb_pieces_total_rp")
+  nbPiecesMoy                Float    @map("nb_pieces_moy")
+  nbPropOccupants            Float?   @map("nb_prop_occupants")
+  millesime                  String
+  source                     String   @default("INSEE-RP")
+  createdAt                  DateTime @default(now()) @map("created_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
+
+  @@map("insee_rp_logement")
+}
+
+// ─────────────────────────────────────────────
+// Table 16 : taxe_fonciere_communes (v4-TF)
+// Taxe Foncière Bâtie par commune — OFGL REI 2024
+// Source : data.ofgl.fr — Licence Ouverte Etalab v2.0
+// var codes : E11=base_nette, E13=montant_commune, E12VOTE=taux_commune
+//             E31=base_nette_gfp, E33=montant_gfp, E32VOTE=taux_gfp
+// Remplace FiscaliteCommune pour le pipeline v4 (millésime 2024, cumul commune+EPCI)
+// ─────────────────────────────────────────────
+
+model TaxeFonciereCommune {
+  id           String @id @default(cuid())
+  code_commune String @unique
+
+  montant_tfb_communal Float?  // E13 : produit réel TFB commune (€/an)
+  montant_tfb_epci     Float?  // E33 : produit réel TFB GFP/EPCI (€/an, null si EPCI sans TFB)
+  montant_tfb_total    Float?  // E13 + E33 (€/an) — charge annuelle réelle propriétaire
+  base_nette           Float?  // E11 : base nette TFB commune (€)
+  taux_communal_pct    Float?  // E12VOTE : taux voté communal (%)
+  taux_epci_pct        Float?  // E32VOTE : taux voté GFP/EPCI (%, null si EPCI sans TFB)
+  millesime            Int     @default(2024)
+  source               String  @default("ofgl-rei")
+  secret_statistique   Boolean @default(false)
+  sec_stat_reason      String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  commune Commune @relation(fields: [code_commune], references: [code_insee], onDelete: Cascade)
+
+  @@index([taux_communal_pct])
+  @@map("taxe_fonciere_communes")
 }

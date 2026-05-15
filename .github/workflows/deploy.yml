@@ -22,13 +22,14 @@ jobs:
               mv ~/immo-score ~/cityrank
             fi
             cd ~/cityrank
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
             docker compose build --no-cache
             docker stop $(docker ps -q --filter "publish=3001") 2>/dev/null || true
             docker compose up -d
             docker image prune -f
             echo "⏳ Healthcheck post-deploy..."
-            sleep 15
+            sleep 45
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001)
             if [ "$HTTP_CODE" != "200" ]; then
               echo "❌ Healthcheck failed (HTTP $HTTP_CODE)"

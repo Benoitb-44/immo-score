@@ -1,0 +1,83 @@
+name: Ingest Loyers OLL (Paris/Lyon/AMP)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — affiche les witnesses sans upsert (non implémenté, toujours false)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false']
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ingestion OLL Paris + Lyon + AMP via VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 10m
+          script_stop: true
+          script: |
+            set -e
+            cd ~/cityrank
+
+            echo "=== [1/6] Création dossier sources ==="
+            mkdir -p data/loyers-sources
+
+            echo "=== [2/6] Téléchargement ZIPs OLL 2024 ==="
+            curl -fsSL -o data/loyers-sources/Base_OP_2024_L7500.zip \
+              "https://www.observatoires-des-loyers.org/datagouv/2024/Base_OP_2024_L7500.zip"
+            curl -fsSL -o data/loyers-sources/Base_OP_2024_L6900.zip \
+              "https://www.observatoires-des-loyers.org/datagouv/2024/Base_OP_2024_L6900.zip"
+            curl -fsSL -o data/loyers-sources/Base_OP_2024_L1300.zip \
+              "https://www.observatoires-des-loyers.org/datagouv/2024/Base_OP_2024_L1300.zip"
+            echo "  ZIPs téléchargés :"
+            ls -lh data/loyers-sources/
+
+            echo "=== [3/6] Copie ZIPs dans le conteneur cityrank ==="
+            docker compose cp data/loyers-sources/Base_OP_2024_L7500.zip cityrank:/tmp/Base_OP_2024_L7500.zip
+            docker compose cp data/loyers-sources/Base_OP_2024_L6900.zip cityrank:/tmp/Base_OP_2024_L6900.zip
+            docker compose cp data/loyers-sources/Base_OP_2024_L1300.zip cityrank:/tmp/Base_OP_2024_L1300.zip
+
+            echo "=== [4/6] Ingestion Paris (75056) ==="
+            docker compose exec -T cityrank npm run ingest:oll-paris -- --zip=/tmp/Base_OP_2024_L7500.zip
+
+            echo "=== [5/6] Ingestion Lyon (69123) ==="
+            docker compose exec -T cityrank npm run ingest:oll-lyon -- --zip=/tmp/Base_OP_2024_L6900.zip
+
+            echo "=== [6/6] Ingestion AMP Marseille (13055) ==="
+            docker compose exec -T cityrank npm run ingest:oll-amp -- --zip=/tmp/Base_OP_2024_L1300.zip
+
+            echo "=== Witnesses SQL prod ==="
+            docker exec cityrank-db sh -c 'psql -U $POSTGRES_USER -d $POSTGRES_DB -c "
+            SET search_path TO immo_score;
+            SELECT commune_id, loyer_m2, q1_m2, q3_m2, nb_obs_src, source, millesime, updated_at
+            FROM loyer_communes
+            WHERE commune_id IN ('\''75056'\'','\''69123'\'','\''13055'\'')
+            ORDER BY commune_id;"'
+
+            echo "=== Yield brut prod ==="
+            docker exec cityrank-db sh -c 'psql -U $POSTGRES_USER -d $POSTGRES_DB -c "
+            SET search_path TO immo_score;
+            SELECT
+              l.commune_id,
+              l.loyer_m2,
+              ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY d.prix_m2)
+                    FILTER (WHERE d.type_local='\''Appartement'\'')::numeric, 0) AS prix_m2_median,
+              ROUND(
+                (l.loyer_m2 * 12 /
+                 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY d.prix_m2)
+                 FILTER (WHERE d.type_local='\''Appartement'\'') * 100)::numeric,
+                2
+              ) AS yield_brut_pct
+            FROM loyer_communes l
+            JOIN dvf_prix d ON l.commune_id = d.code_commune
+            WHERE l.commune_id IN ('\''75056'\'','\''69123'\'','\''13055'\'')
+              AND l.niveau='\''N1bis'\''
+            GROUP BY l.commune_id, l.loyer_m2
+            ORDER BY l.commune_id;"'
