@@ -6,6 +6,49 @@
 
 ---
 
+## Session 2026-05-16 — VPS cleanup + deploy.yml hardening (zombie container)
+
+**Agent(s)** : `@cto`  
+**Commit** : `fix(ci): harden deploy.yml — zombie container cleanup + force-recreate`
+
+### Contexte
+
+Run #90 (PR-A CONTENT-01 merge) a échoué sur un conflit Docker : le container existant
+`cityrank` a été renommé `7c75877d13c4_cityrank` (temp Docker rename mid-recreate) lors d'un
+run précédent interrompu, bloquant la recreation au run suivant.
+Run #91 (PR-B) est passé vert par chance (le `docker stop` + `docker compose up -d` a quand même
+réussi à contourner).
+
+### Root cause
+
+`docker compose up -d` sans flags : Docker renomme l'ancien container en `[hash]_cityrank`
+avant de créer le nouveau. Si le process est interrompu entre le rename et la création, le zombie
+reste et bloque le prochain run.
+
+### Fix appliqué (`deploy.yml`)
+
+| Changement | Rôle |
+|-----------|------|
+| Zombie cleanup avant le `up` | `docker ps -a --filter exited/created/dead \| grep ^[a-f0-9]+_cityrank$ \| xargs -r docker rm` |
+| `docker compose up -d` → `up -d --force-recreate --remove-orphans cityrank` | Force une recreation propre du container app uniquement |
+| `workflow_dispatch` ajouté | Trigger manuel sans push dummy |
+| Vérif post-deploy | `grep ... && echo ⚠️ warning || echo ✅ clean` (pattern safe sous `pipefail`) |
+
+### Gotcha résolu
+
+Un 2e commit a été nécessaire : le bloc de vérif zombie utilisait `VAR=$(... \| grep ... || true)`
+qui échoue quand même sous `set -eo pipefail` (appleboy/ssh-action). Fix : pattern
+`grep ... && echo warning || echo clean` qui est toujours exit 0.
+
+### État final
+
+- Run #93 ✅ vert en 4m32s
+- `docker ps -a` : 4 containers `Up`, aucun zombie `[hash]_cityrank`
+- HTTP 200, `x-nextjs-cache: HIT`
+- "1 zombie process" dans `system information` = process Linux orphelin non Docker, hors scope
+
+---
+
 ## Session 2026-05-16 — CONTENT-01 + Page Investisseur MVP V0 (PR #22 + PR #23)
 
 **Agent(s)** : `@frontend` + `@backend`  
