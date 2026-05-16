@@ -70,13 +70,10 @@ jobs:
             echo "✅ Healthcheck OK (HTTP $HTTP_CODE)"
 
             echo "=== Vérification aucun zombie post-deploy ==="
-            ZOMBIES=$(docker ps -a --filter "status=exited" --filter "status=created" \
-              --format "{{.Names}}" | grep -E '^[a-f0-9]+_cityrank$' || true)
-            if [ -n "$ZOMBIES" ]; then
-              echo "⚠️  Zombie(s) détecté(s) post-deploy : $ZOMBIES"
-            else
-              echo "✅ Aucun zombie post-deploy"
-            fi
+            docker ps -a --filter "status=exited" --filter "status=created" \
+              --format "{{.Names}}" | grep -E '^[a-f0-9]+_cityrank$' \
+              && echo "⚠️  Zombie(s) détecté(s) post-deploy (voir ligne ci-dessus)" \
+              || echo "✅ Aucun zombie post-deploy"
 
   notify-failure:
     runs-on: ubuntu-latest
