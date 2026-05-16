@@ -496,11 +496,14 @@ export default function MethodologiePage() {
               { source: 'BPE — équipements', operateur: 'INSEE', millesime: '2024', couverture: '34 875 communes (100 %)' },
               { source: 'Géorisques GASPAR — risques', operateur: 'BRGM / Min. Transition écologique', millesime: '2025', couverture: '34 864 communes (99,97 %)' },
               { source: 'DPE — performance énergétique', operateur: 'ADEME', millesime: '2021–2025', couverture: '31 664 communes (91 %)' },
+              { source: 'Loyers — Carte Loyers ANIL/Cerema', operateur: 'Ministère du Logement / Cerema', millesime: '2023', couverture: '~34 800 communes (hors Paris/Lyon/Marseille)' },
+              { source: 'Loyers — OLAP (Paris)', operateur: 'OLAP', millesime: '2024', couverture: 'Paris (75056)' },
+              { source: 'Loyers — OLL Lyon & AMP', operateur: 'OLL Lyon / URCAUE PACA', millesime: '2024', couverture: 'Lyon (69123), Marseille (13055)' },
               { source: 'Code Officiel Géographique', operateur: 'INSEE', millesime: '2026', couverture: '34 875 communes' },
             ].map((row, i) => (
               <div
                 key={row.source}
-                className={`grid grid-cols-[2fr_1.5fr_1fr_1.5fr] divide-x-2 divide-ink min-w-[600px] ${i < 4 ? 'border-b-2 border-ink' : ''}`}
+                className={`grid grid-cols-[2fr_1.5fr_1fr_1.5fr] divide-x-2 divide-ink min-w-[600px] ${i < 7 ? 'border-b-2 border-ink' : ''}`}
               >
                 <div className="px-4 py-3">
                   <p className="font-display font-semibold text-ink text-sm">{row.source}</p>
@@ -524,6 +527,9 @@ export default function MethodologiePage() {
               { label: 'BPE — insee.fr/fr/statistiques/8217527', href: 'https://www.insee.fr/fr/statistiques/8217527' },
               { label: 'Géorisques — georisques.gouv.fr', href: 'https://georisques.gouv.fr' },
               { label: 'DPE — data.ademe.fr/datasets/dpe03existant', href: 'https://data.ademe.fr/datasets/dpe03existant' },
+              { label: 'Loyers ANIL/Cerema — data.gouv.fr (Carte des loyers 2023)', href: 'https://www.data.gouv.fr/datasets/carte-des-loyers-indicateurs-de-loyers-d-annonce-par-commune-en-2023/' },
+              { label: 'OLAP Paris — observatoire-des-loyers.fr', href: 'https://www.observatoire-des-loyers.fr/' },
+              { label: 'OLL Lyon — observatoire-loyers-lyon.org', href: 'https://www.observatoire-loyers-lyon.org/' },
             ].map((src) => (
               <a
                 key={src.href}

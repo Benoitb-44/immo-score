@@ -19,11 +19,11 @@ const spaceGrotesk = Space_Grotesk({
 
 export const metadata: Metadata = {
   title: {
-    default: "CityRank — Score d'attractivité immobilière par commune",
+    default: "CityRank — Score immobilier par profil (35 000 communes) | DVF · DGFiP · INSEE",
     template: "%s | CityRank",
   },
   description:
-    "Découvrez le score d'attractivité immobilière de chaque commune de France. Basé sur les prix DVF, le DPE, les équipements, les risques et la fiscalité.",
+    "Score immobilier des 35 000 communes françaises par profil d'acheteur (Investisseur, Primo, Famille, Retraité). Données DVF, DGFiP, INSEE.",
   metadataBase: new URL("https://cityrank.fr"),
   robots: {
     index: true,
