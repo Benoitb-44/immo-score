@@ -6,6 +6,7 @@ export function GET() {
   <sitemap><loc>${BASE_URL}/sitemap/0</loc></sitemap>
   <sitemap><loc>${BASE_URL}/sitemap/1</loc></sitemap>
   <sitemap><loc>${BASE_URL}/sitemap/2</loc></sitemap>
+  <sitemap><loc>${BASE_URL}/sitemap/investisseur</loc></sitemap>
 </sitemapindex>`;
 
   return new Response(xml, {
