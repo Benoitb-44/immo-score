@@ -3,6 +3,7 @@ name: Deploy CityRank
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -24,10 +25,31 @@ jobs:
             cd ~/cityrank
             git fetch origin main
             git reset --hard origin/main
+
             docker compose build --no-cache
+
+            # Cleanup zombie containers: temp names créés par Docker lors d'un
+            # recreate interrompu (ex: "7c75877d13c4_cityrank").
+            # On ne supprime que les containers exited/created — jamais le container actif.
+            docker ps -a \
+              --filter "status=exited" \
+              --filter "status=created" \
+              --filter "status=dead" \
+              --format "{{.Names}}" \
+              | grep -E '^[a-f0-9]+_cityrank$' \
+              | xargs -r docker rm \
+              || true
+
+            # Stop gracieux du container app actif (port 3001)
             docker stop $(docker ps -q --filter "publish=3001") 2>/dev/null || true
-            docker compose up -d
+
+            # Force-recreate cityrank uniquement (db/mcp-db/nginx non touchés)
+            # --force-recreate : recrée même si config inchangée, évite rename zombie
+            # --remove-orphans : supprime containers de services retirés du compose
+            docker compose up -d --force-recreate --remove-orphans cityrank
+
             docker image prune -f
+
             echo "⏳ Attente PostgreSQL ready..."
             sleep 5
             echo "⏳ Application des migrations Prisma..."
@@ -37,6 +59,7 @@ jobs:
               exit 1
             fi
             echo "✅ Migrations appliquées"
+
             echo "⏳ Healthcheck post-deploy..."
             sleep 45
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001)
@@ -45,6 +68,15 @@ jobs:
               exit 1
             fi
             echo "✅ Healthcheck OK (HTTP $HTTP_CODE)"
+
+            echo "=== Vérification aucun zombie post-deploy ==="
+            ZOMBIES=$(docker ps -a --filter "status=exited" --filter "status=created" \
+              --format "{{.Names}}" | grep -E '^[a-f0-9]+_cityrank$' || true)
+            if [ -n "$ZOMBIES" ]; then
+              echo "⚠️  Zombie(s) détecté(s) post-deploy : $ZOMBIES"
+            else
+              echo "✅ Aucun zombie post-deploy"
+            fi
 
   notify-failure:
     runs-on: ubuntu-latest
