@@ -6,6 +6,51 @@
 
 ---
 
+## Session 2026-05-16 — CONTENT-01 + Page Investisseur MVP V0 (PR #22 + PR #23)
+
+**Agent(s)** : `@frontend` + `@backend`  
+**Branches** : `claude/content-01-home-refresh-pra` · `claude/investisseur-page-mvp-prb`
+
+### PR #22 — Refresh home Investisseur-first (CONTENT-01)
+
+| Fichier | Modification |
+|---------|-------------|
+| `src/app/page.tsx` | Hero investisseur-first — H1/sous-titre/CTA copy Orchestrateur, 4 cartes profils, section "Pourquoi par profil ?", stats bar |
+| `src/app/layout.tsx` | Title root + méta-description root 155 car. investisseur-first (DVF · DGFiP · INSEE) |
+| `src/components/Navbar.tsx` | Dropdown Profils CSS-only `group-hover`, 4 entrées (Investisseur actif) |
+| `src/components/Footer.tsx` | BUG-12 — ajout ANIL/Cerema · OLAP · OLL dans Sources |
+| `src/app/methodologie/page.tsx` | BUG-13 — 3 lignes + 3 liens sources loyers dans section 02 |
+
+### PR #23 — Page Investisseur MVP V0
+
+| Fichier | Rôle |
+|---------|------|
+| `src/lib/repositories/investisseur.repository.ts` | Yield brut, rangs, top 500 staticParams |
+| `src/components/InvestisseurKPI.tsx` | Grid 2×2 (yield, prix DVF, loyer, TF) |
+| `src/app/communes/[slug]/investisseur/page.tsx` | ISR 7j, JSON-LD, RentalCalculator pré-rempli |
+| `src/app/profil/investisseur/page.tsx` | Pillar top 50 national — JSON-LD ItemList |
+| `src/app/departements/[code]/investisseur/page.tsx` | Top 20 par département |
+| `src/app/sitemap/investisseur/route.ts` | 500 URLs Wave 1 |
+| `src/app/sitemap.xml/route.ts` | +1 entrée `<sitemap>` investisseur |
+
+### Algorithme yield brut (MVP V0)
+
+```
+yield_brut = (loyer_m2 × 12) / prix_m2_dvf_median × 100  (%)
+```
+
+Hiérarchie loyers : OLL (N1/N1bis) > ANIL/Cerema (N2) — résolu à l'ingestion, pas au calcul.  
+Prix DVF : `PERCENTILE_CONT(0.5)` sur `dvf_prix.prix_m2` toutes transactions, sans filtre époque.
+
+### État PRs
+
+- PR #22 : prête pour review `@code-reviewer`, merge en attente
+- PR #23 : prête pour review `@code-reviewer`, merge en attente smoke test PR #22 prod
+- 5/5 témoins à valider en prod post-merge (DoD PR-B)
+- Sitemap GSC à soumettre par Benoît post-merge PR #23
+
+---
+
 ## Session 2026-05-11 — DATA-v4-LOY-3M PR #9 : PATCH 2+3 + validation AMP locale
 
 **Agent(s)** : `@data-engineer`  
